@@ -3,45 +3,57 @@
 <head>
   <meta charset="UTF-8" />
   <title>PDF Export Frame</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: white;
+    }
+  </style>
 </head>
 <body>
+  <p>✅ PDF Export Frame Ready</p>
+
   <script>
-    let pdf;
-    let currentPage = 0;
-    const pages = [];
+    const { jsPDF } = window.jspdf;
+    let pdf = null;
+    let pageCount = 0;
 
-    // Receive screenshot data from Wix
     window.addEventListener("message", async (event) => {
-      const { type, data, orientation } = event.data || {};
+      const msg = event.data?.type;
+      const data = event.data?.data;
+      const orientation = event.data?.orientation || "portrait";
 
-      if (type === "pdf-frame-ready") {
-        // Tell Wix we're ready to receive screenshots
+      if (msg === "render-page" && data) {
+        const img = new Image();
+        img.src = data;
+        await img.decode();
+
+        const width = orientation === "landscape" ? 297 : 210;
+        const height = orientation === "landscape" ? 210 : 297;
+
+        if (!pdf) {
+          pdf = new jsPDF({ orientation, unit: "mm", format: "a4" });
+        } else {
+          pdf.addPage([width, height], orientation);
+        }
+
+        pdf.setPage(++pageCount);
+        pdf.addImage(data, 'JPEG', 0, 0, width, height);
+
         parent.postMessage({ type: "next-page" }, "*");
+      }
 
-      } else if (type === "render-page") {
-        // Receive a page image and store it
-        pages.push({ data, orientation });
-        currentPage++;
-        parent.postMessage({ type: "next-page" }, "*");
-
-      } else if (type === "render-complete") {
-        // All pages received – begin PDF generation
-        pdf = new jspdf.jsPDF({ format: "a5", orientation: pages[0].orientation || "portrait" });
-
-        pages.forEach((page, index) => {
-          const { data, orientation } = page;
-          if (index > 0) pdf.addPage("a5", orientation);
-          pdf.addImage(data, "JPEG", 0, 0, orientation === "landscape" ? 210 : 148, 210);
-        });
-
+      if (msg === "render-complete") {
         pdf.save("Tangihanga-Service-Sheet.pdf");
         parent.postMessage({ type: "done" }, "*");
       }
     });
 
-    // Confirm ready to parent
-    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
+
