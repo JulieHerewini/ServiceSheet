@@ -7,72 +7,79 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     body {
-      margin: 0;
       font-family: sans-serif;
+      margin: 0;
+      padding: 0;
       background: white;
     }
     .page {
+      display: none;
+      width: 793px; /* A5 width at 96dpi */
+      height: 1122px; /* A5 height at 96dpi */
       padding: 10px;
       box-sizing: border-box;
     }
-    #coverPage {
-      width: 210mm;
-      height: 148.5mm;
-    }
-    #orderPage {
-      width: 297mm;
-      height: 210mm;
-    }
-    #backPage {
-      width: 210mm;
-      height: 148.5mm;
+    .landscape {
+      width: 1122px; /* A4 width landscape */
+      height: 793px;
     }
   </style>
 </head>
 <body>
-  <div class="page" id="coverPage"></div>
-  <div class="page" id="orderPage"></div>
-  <div class="page" id="backPage"></div>
+  <div id="coverPreviewBox" class="page"></div>
+  <div id="orderPreviewBox" class="page landscape"></div>
+  <div id="backPreviewBox" class="page"></div>
 
   <script>
-    const { jsPDF } = window.jspdf;
+    const pages = [
+      { id: "coverPreviewBox", format: "A5", orientation: "portrait" },
+      { id: "orderPreviewBox", format: "A4", orientation: "landscape" },
+      { id: "backPreviewBox", format: "A5", orientation: "portrait" }
+    ];
 
-    function hideAllPages() {
-      document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+    function wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    async function renderPageToCanvas(pageId) {
-      hideAllPages();
-      const el = document.getElementById(pageId);
-      if (!el) return null;
-      el.style.display = 'block';
-      await new Promise(r => setTimeout(r, 800)); // Give it time to render
-      return await html2canvas(el);
-    }
-
-    async function downloadPDF() {
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [210, 148.5] }); // A5 size
-      const pages = ["coverPage", "orderPage", "backPage"];
+    async function renderPDF() {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF();
 
       for (let i = 0; i < pages.length; i++) {
-        const canvas = await renderPageToCanvas(pages[i]);
-        if (!canvas) continue;
+        const { id, format, orientation } = pages[i];
+        const pageEl = document.getElementById(id);
+        if (!pageEl) continue;
+
+        // Show only this page
+        pages.forEach(p => {
+          const el = document.getElementById(p.id);
+          if (el) el.style.display = "none";
+        });
+        pageEl.style.display = "block";
+
+        // Wait for rendering
+        await wait(1000);
+
+        const canvas = await html2canvas(pageEl);
         const imgData = canvas.toDataURL("image/png");
-        const isOrder = pages[i] === "orderPage";
-        if (i > 0) doc.addPage(isOrder ? [297, 210] : [210, 148.5], isOrder ? 'landscape' : 'portrait');
-        doc.addImage(imgData, 'PNG', 0, 0, isOrder ? 297 : 210, isOrder ? 210 : 148.5);
-        parent.postMessage({ type: "pdf-progress", page: pages[i], index: i + 1 }, "*");
+
+        if (i > 0) pdf.addPage(format, orientation);
+        pdf.addImage(imgData, 'PNG', 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
+
+        window.parent.postMessage({ type: "progress", current: i + 1, total: pages.length }, "*");
       }
 
-      doc.save("Tangihanga-Service-Sheet.pdf");
-      parent.postMessage({ type: "pdf-complete" }, "*");
+      pdf.save("Tangihanga-Service-Sheet.pdf");
+      window.parent.postMessage({ type: "complete" }, "*");
     }
 
     window.addEventListener("message", (event) => {
       if (event.data?.type === "render-pdf") {
-        downloadPDF();
+        renderPDF();
       }
     });
+
+    console.log("✅ PDF Export Frame Ready");
   </script>
 </body>
 </html>
