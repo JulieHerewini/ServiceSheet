@@ -2,12 +2,77 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>PDF Export Frame</title>
+  <title>Tangihanga PDF Export</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: white;
+    }
+    .page {
+      padding: 10px;
+      box-sizing: border-box;
+    }
+    #coverPage {
+      width: 210mm;
+      height: 148.5mm;
+    }
+    #orderPage {
+      width: 297mm;
+      height: 210mm;
+    }
+    #backPage {
+      width: 210mm;
+      height: 148.5mm;
+    }
+  </style>
 </head>
 <body>
-  ✅ PDF frame loaded
+  <div class="page" id="coverPage"></div>
+  <div class="page" id="orderPage"></div>
+  <div class="page" id="backPage"></div>
+
   <script>
-    console.log("PDF frame ready");
+    const { jsPDF } = window.jspdf;
+
+    function hideAllPages() {
+      document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+    }
+
+    async function renderPageToCanvas(pageId) {
+      hideAllPages();
+      const el = document.getElementById(pageId);
+      if (!el) return null;
+      el.style.display = 'block';
+      await new Promise(r => setTimeout(r, 800)); // Give it time to render
+      return await html2canvas(el);
+    }
+
+    async function downloadPDF() {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [210, 148.5] }); // A5 size
+      const pages = ["coverPage", "orderPage", "backPage"];
+
+      for (let i = 0; i < pages.length; i++) {
+        const canvas = await renderPageToCanvas(pages[i]);
+        if (!canvas) continue;
+        const imgData = canvas.toDataURL("image/png");
+        const isOrder = pages[i] === "orderPage";
+        if (i > 0) doc.addPage(isOrder ? [297, 210] : [210, 148.5], isOrder ? 'landscape' : 'portrait');
+        doc.addImage(imgData, 'PNG', 0, 0, isOrder ? 297 : 210, isOrder ? 210 : 148.5);
+        parent.postMessage({ type: "pdf-progress", page: pages[i], index: i + 1 }, "*");
+      }
+
+      doc.save("Tangihanga-Service-Sheet.pdf");
+      parent.postMessage({ type: "pdf-complete" }, "*");
+    }
+
+    window.addEventListener("message", (event) => {
+      if (event.data?.type === "render-pdf") {
+        downloadPDF();
+      }
+    });
   </script>
 </body>
 </html>
