@@ -1,91 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>PDF Export Frame</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <style>
-    body {
-      margin: 0;
-      font-family: sans-serif;
-      background: white;
-    }
-    .hidden {
-      display: none;
-    }
-  </style>
 </head>
 <body>
-  <div id="pageContainer" class="hidden">
-    <img id="captureImage" src="" style="width: 100%;" />
-  </div>
-
+  <div id="output" style="display:none;"></div>
   <script>
-    const pages = [];
-    let rendering = false;
-    let currentOrientation = "portrait";
-
-    function renderPDF() {
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a5" });
-
-      pages.forEach((dataUrl, index) => {
-        const orientation = dataUrl.orientation || "portrait";
-        const format = orientation === "landscape" ? [842, 595] : [595, 842];
-        const tempPDF = new jsPDF({ orientation, unit: "pt", format });
-
-        tempPDF.addImage(dataUrl.image, "JPEG", 0, 0, format[0], format[1]);
-
-        if (index > 0) {
-          pdf.addPage(format, orientation);
-        }
-
-        pdf.addImage(dataUrl.image, "JPEG", 0, 0, format[0], format[1]);
-      });
-
-      pdf.save("Tangihanga-Service-Sheet.pdf");
-
-      window.parent.postMessage({ type: "done" }, "*");
-    }
-
-    function showImageAndCapture(dataUrl, orientation) {
-      return new Promise((resolve) => {
-        const img = document.getElementById("captureImage");
-        img.onload = () => {
-          html2canvas(img).then(() => resolve());
-        };
-        currentOrientation = orientation;
-        img.src = dataUrl;
-      });
-    }
+    const flipbookImages = [];
+    const { jsPDF } = window.jspdf;
 
     window.addEventListener("message", async (event) => {
-      const msg = event.data;
+      const { type, data, orientation } = event.data;
 
-      if (!msg || !msg.type) return;
-
-      if (msg.type === "render-pdf") {
-        window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
+      if (type === "render-page" && data) {
+        flipbookImages.push({ image: data, orientation });
+        parent.postMessage({ type: "next-page" }, "*");
       }
 
-      if (msg.type === "render-page") {
-        pages.push({
-          image: msg.data,
-          orientation: msg.orientation || "portrait"
+      if (type === "render-complete") {
+        const doc = new jsPDF({
+          orientation: flipbookImages[0]?.orientation || "portrait",
+          unit: "pt",
+          format: "a4"
         });
 
-        await showImageAndCapture(msg.data, msg.orientation);
-        window.parent.postMessage({ type: "next-page" }, "*");
-      }
+        flipbookImages.forEach((page, index) => {
+          const orientation = page.orientation === "landscape" ? "l" : "p";
+          if (index > 0) doc.addPage("a4", orientation);
+          doc.setPage(index + 1);
+          doc.addImage(page.image, "JPEG", 10, 10, 575, 820); // adjust padding here
+        });
 
-      if (msg.type === "render-complete") {
-        renderPDF();
+        doc.save("Tangihanga-Service-Sheet.pdf");
+        parent.postMessage({ type: "done" }, "*");
       }
     });
 
+    // Notify Wix page that frame is ready
     window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
+
 
