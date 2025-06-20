@@ -1,48 +1,70 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>PDF Export Frame</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
-  <div id="output" style="display:none;"></div>
   <script>
-    const flipbookImages = [];
+    const pages = [];
     const { jsPDF } = window.jspdf;
 
-    window.addEventListener("message", async (event) => {
-      const { type, data, orientation } = event.data;
-
-      if (type === "render-page" && data) {
-        flipbookImages.push({ image: data, orientation });
-        parent.postMessage({ type: "next-page" }, "*");
+    function generatePDF() {
+      if (pages.length === 0) {
+        console.error("No pages to export.");
+        return;
       }
 
-      if (type === "render-complete") {
-        const doc = new jsPDF({
-          orientation: flipbookImages[0]?.orientation || "portrait",
-          unit: "pt",
-          format: "a4"
-        });
+      const doc = new jsPDF({
+        orientation: pages[0].orientation === "landscape" ? "landscape" : "portrait",
+        unit: "pt",
+        format: pages[0].orientation === "landscape" ? [842, 595] : [595, 842],
+      });
 
-        flipbookImages.forEach((page, index) => {
-          const orientation = page.orientation === "landscape" ? "l" : "p";
-          if (index > 0) doc.addPage("a4", orientation);
-          doc.setPage(index + 1);
-          doc.addImage(page.image, "JPEG", 10, 10, 575, 820); // adjust padding here
-        });
+      pages.forEach((page, index) => {
+        const imgProps = doc.getImageProperties(page.image);
+        const width = doc.internal.pageSize.getWidth();
+        const height = (imgProps.height * width) / imgProps.width;
 
-        doc.save("Tangihanga-Service-Sheet.pdf");
-        parent.postMessage({ type: "done" }, "*");
-      }
+        if (index > 0) {
+          doc.addPage(
+            page.orientation === "landscape" ? [842, 595] : [595, 842],
+            page.orientation
+          );
+        }
+
+        doc.addImage(page.image, 'JPEG', 0, 0, width, height);
+      });
+
+      doc.save("Tangihanga-Service-Sheet.pdf");
+
+      // Tell Wix lightbox it's finished
+      window.top.postMessage({ type: "done" }, "*");
+    }
+
+    // Initial ping
+    window.addEventListener("load", () => {
+      window.top.postMessage({ type: "pdf-frame-ready" }, "*");
     });
 
-    // Notify Wix page that frame is ready
-    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    window.addEventListener("message", (event) => {
+      const { type, data, orientation } = event.data || {};
+
+      if (type === "render-page" && data) {
+        console.log("✅ Received page");
+        pages.push({ image: data, orientation });
+        window.top.postMessage({ type: "next-page" }, "*");
+
+      } else if (type === "render-complete") {
+        console.log("✅ All pages received, generating PDF");
+        generatePDF();
+      }
+    });
   </script>
 </body>
 </html>
+
 
 
