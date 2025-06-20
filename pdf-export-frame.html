@@ -3,83 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <title>PDF Export Frame</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <style>
-    body {
-      margin: 0;
-      font-family: sans-serif;
-      background: white;
-    }
-    .page {
-      width: 794px;
-      height: 1122px;
-      padding: 10px;
-      box-sizing: border-box;
-    }
-  </style>
 </head>
 <body>
   <script>
-    const flipIds = ["coverPreviewBox", "orderPreviewBox", "backPreviewBox"];
-    let pageIndex = 0;
-    let pages = [];
-    let wixParent;
+    let pdf;
+    let currentPage = 0;
+    const pages = [];
 
-    function wait(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
-    }
+    // Receive screenshot data from Wix
+    window.addEventListener("message", async (event) => {
+      const { type, data, orientation } = event.data || {};
 
-    async function renderNext() {
-      const id = flipIds[pageIndex];
-      const el = window.parent.document.getElementById(id);
-      if (!el) return;
+      if (type === "pdf-frame-ready") {
+        // Tell Wix we're ready to receive screenshots
+        parent.postMessage({ type: "next-page" }, "*");
 
-      // Capture screenshot
-      const canvas = await html2canvas(el, {
-        scale: 2,
-        backgroundColor: "#ffffff",
-        useCORS: true
-      });
-      const imgData = canvas.toDataURL("image/png");
-      pages.push(imgData);
+      } else if (type === "render-page") {
+        // Receive a page image and store it
+        pages.push({ data, orientation });
+        currentPage++;
+        parent.postMessage({ type: "next-page" }, "*");
 
-      pageIndex++;
-      if (pageIndex < flipIds.length) {
-        wixParent.postMessage({ type: "next-page" }, "*");
-        await wait(1200); // give time for the next box to show
-        renderNext();
-      } else {
-        createPdf();
-      }
-    }
+      } else if (type === "render-complete") {
+        // All pages received – begin PDF generation
+        pdf = new jspdf.jsPDF({ format: "a5", orientation: pages[0].orientation || "portrait" });
 
-    function createPdf() {
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF();
+        pages.forEach((page, index) => {
+          const { data, orientation } = page;
+          if (index > 0) pdf.addPage("a5", orientation);
+          pdf.addImage(data, "JPEG", 0, 0, orientation === "landscape" ? 210 : 148, 210);
+        });
 
-      pages.forEach((img, i) => {
-        const orientation = i === 1 ? "landscape" : "portrait";
-        if (i > 0) pdf.addPage(orientation);
-        pdf.addImage(img, 'PNG', 0, 0, 210, 297); // Full A4
-      });
-
-      pdf.save("Tangihanga-Service-Sheet.pdf");
-      wixParent.postMessage({ type: "done" }, "*");
-    }
-
-    window.addEventListener("message", (event) => {
-      const msg = event.data?.type;
-      if (msg === "render-pdf") {
-        wixParent = event.source;
-        pageIndex = 0;
-        pages = [];
-        renderNext();
+        pdf.save("Tangihanga-Service-Sheet.pdf");
+        parent.postMessage({ type: "done" }, "*");
       }
     });
 
-    console.log("✅ PDF Export Frame Ready");
+    // Confirm ready to parent
+    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
-
