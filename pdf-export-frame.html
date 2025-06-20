@@ -11,48 +11,80 @@
       font-family: sans-serif;
       background: white;
     }
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
 <body>
-  <p>✅ PDF Export Frame Ready</p>
+  <div id="pageContainer" class="hidden">
+    <img id="captureImage" src="" style="width: 100%;" />
+  </div>
 
   <script>
-    const { jsPDF } = window.jspdf;
-    let pdf = null;
-    let pageCount = 0;
+    const pages = [];
+    let rendering = false;
+    let currentOrientation = "portrait";
 
-    window.addEventListener("message", async (event) => {
-      const msg = event.data?.type;
-      const data = event.data?.data;
-      const orientation = event.data?.orientation || "portrait";
+    function renderPDF() {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a5" });
 
-      if (msg === "render-page" && data) {
-        const img = new Image();
-        img.src = data;
-        await img.decode();
+      pages.forEach((dataUrl, index) => {
+        const orientation = dataUrl.orientation || "portrait";
+        const format = orientation === "landscape" ? [842, 595] : [595, 842];
+        const tempPDF = new jsPDF({ orientation, unit: "pt", format });
 
-        const width = orientation === "landscape" ? 297 : 210;
-        const height = orientation === "landscape" ? 210 : 297;
+        tempPDF.addImage(dataUrl.image, "JPEG", 0, 0, format[0], format[1]);
 
-        if (!pdf) {
-          pdf = new jsPDF({ orientation, unit: "mm", format: "a4" });
-        } else {
-          pdf.addPage([width, height], orientation);
+        if (index > 0) {
+          pdf.addPage(format, orientation);
         }
 
-        pdf.setPage(++pageCount);
-        pdf.addImage(data, 'JPEG', 0, 0, width, height);
+        pdf.addImage(dataUrl.image, "JPEG", 0, 0, format[0], format[1]);
+      });
 
-        parent.postMessage({ type: "next-page" }, "*");
+      pdf.save("Tangihanga-Service-Sheet.pdf");
+
+      window.parent.postMessage({ type: "done" }, "*");
+    }
+
+    function showImageAndCapture(dataUrl, orientation) {
+      return new Promise((resolve) => {
+        const img = document.getElementById("captureImage");
+        img.onload = () => {
+          html2canvas(img).then(() => resolve());
+        };
+        currentOrientation = orientation;
+        img.src = dataUrl;
+      });
+    }
+
+    window.addEventListener("message", async (event) => {
+      const msg = event.data;
+
+      if (!msg || !msg.type) return;
+
+      if (msg.type === "render-pdf") {
+        window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
       }
 
-      if (msg === "render-complete") {
-        pdf.save("Tangihanga-Service-Sheet.pdf");
-        parent.postMessage({ type: "done" }, "*");
+      if (msg.type === "render-page") {
+        pages.push({
+          image: msg.data,
+          orientation: msg.orientation || "portrait"
+        });
+
+        await showImageAndCapture(msg.data, msg.orientation);
+        window.parent.postMessage({ type: "next-page" }, "*");
+      }
+
+      if (msg.type === "render-complete") {
+        renderPDF();
       }
     });
 
-    parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
