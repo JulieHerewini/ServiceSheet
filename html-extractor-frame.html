@@ -1,0 +1,25 @@
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Wix HTML Extractor Frame</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #fff; }
+  </style>
+</head>
+<body>
+  <script>
+    window.addEventListener("message", async (event) => {
+      const { type, selector } = event.data || {};
+      if (type === "getOuterHTML") {
+        try {
+          const el = parent.document.querySelector(selector);
+          const html = el ? el.outerHTML : "<div>Not found</div>";
+          parent.postMessage({ type: "outerHTML", selector, html }, "*");
+        } catch (e) {
+          parent.postMessage({ type: "outerHTML", selector, html: `<div>Error: ${e.message}</div>` }, "*");
+        }
+      }
+    });
+  </script>
+</body>
+</html>
