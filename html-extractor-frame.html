@@ -1,22 +1,20 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Wix HTML Extractor Frame</title>
-  <style>
-    body { margin: 0; font-family: sans-serif; background: #fff; }
-  </style>
+  <title>HTML Extractor</title>
 </head>
 <body>
   <script>
-    window.addEventListener("message", async (event) => {
+    window.addEventListener("message", (event) => {
       const { type, selector } = event.data || {};
-      if (type === "getOuterHTML") {
+      if (type === "getOuterHTML" && selector) {
         try {
-          const el = parent.document.querySelector(selector);
-          const html = el ? el.outerHTML : "<div>Not found</div>";
+          const element = parent.document.querySelector(selector);
+          const html = element ? element.outerHTML : "<div>Not found</div>";
           parent.postMessage({ type: "outerHTML", selector, html }, "*");
-        } catch (e) {
-          parent.postMessage({ type: "outerHTML", selector, html: `<div>Error: ${e.message}</div>` }, "*");
+        } catch (err) {
+          parent.postMessage({ type: "outerHTML", selector, html: `<div>Error extracting HTML: ${err.message}</div>` }, "*");
         }
       }
     });
