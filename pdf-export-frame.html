@@ -1,70 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>PDF Export Frame</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: white; }
+    .page-preview { display: none; width: 100%; height: 100%; padding: 20px; box-sizing: border-box; }
+    .active { display: block !important; }
+  </style>
 </head>
 <body>
+  <div id="coverPreviewBox" class="page-preview"></div>
+  <div id="orderPreviewBox" class="page-preview"></div>
+  <div id="backPreviewBox" class="page-preview"></div>
+
   <script>
-    const pages = [];
     const { jsPDF } = window.jspdf;
+    const pages = [];
+    let currentIndex = 0;
+    const pageOrder = ["coverPreviewBox", "orderPreviewBox", "backPreviewBox"];
 
-    function generatePDF() {
-      if (pages.length === 0) {
-        console.error("No pages to export.");
-        return;
+    window.addEventListener("message", async (event) => {
+      const { type, pageId, orientation, html } = event.data || {};
+
+      if (type === "renderContent" && pageId && html) {
+        document.getElementById(pageId).innerHTML = html;
       }
 
-      const doc = new jsPDF({
-        orientation: pages[0].orientation === "landscape" ? "landscape" : "portrait",
-        unit: "pt",
-        format: pages[0].orientation === "landscape" ? [842, 595] : [595, 842],
-      });
+      if (type === "request-screenshot") {
+        pageOrder.forEach(id => document.getElementById(id).classList.remove("active"));
+        const target = document.getElementById(pageId);
+        target.classList.add("active");
 
-      pages.forEach((page, index) => {
-        const imgProps = doc.getImageProperties(page.image);
-        const width = doc.internal.pageSize.getWidth();
-        const height = (imgProps.height * width) / imgProps.width;
+        await new Promise(r => setTimeout(r, 300)); // Wait for transition/rendering
 
-        if (index > 0) {
-          doc.addPage(
-            page.orientation === "landscape" ? [842, 595] : [595, 842],
-            page.orientation
-          );
-        }
+        const canvas = await html2canvas(target);
+        pages.push({ canvas, orientation });
 
-        doc.addImage(page.image, 'JPEG', 0, 0, width, height);
-      });
+        window.parent.postMessage({ type: "next-page" }, "*");
+      }
 
-      doc.save("Tangihanga-Service-Sheet.pdf");
+      if (type === "render-complete") {
+        const doc = new jsPDF({ orientation: pages[0].orientation, unit: 'px', format: pages[0].orientation === 'landscape' ? 'a4' : 'a5' });
 
-      // Tell Wix lightbox it's finished
-      window.top.postMessage({ type: "done" }, "*");
-    }
+        pages.forEach(({ canvas, orientation }, i) => {
+          const imgData = canvas.toDataURL("image/jpeg", 1.0);
+          if (i > 0) doc.addPage(orientation === 'landscape' ? 'a4' : 'a5', orientation);
+          doc.addImage(imgData, 'JPEG', 0, 0, orientation === 'landscape' ? 842 : 420, orientation === 'landscape' ? 595 : 595);
+        });
 
-    // Initial ping
-    window.addEventListener("load", () => {
-      window.top.postMessage({ type: "pdf-frame-ready" }, "*");
-    });
-
-    window.addEventListener("message", (event) => {
-      const { type, data, orientation } = event.data || {};
-
-      if (type === "render-page" && data) {
-        console.log("✅ Received page");
-        pages.push({ image: data, orientation });
-        window.top.postMessage({ type: "next-page" }, "*");
-
-      } else if (type === "render-complete") {
-        console.log("✅ All pages received, generating PDF");
-        generatePDF();
+        doc.save("tangihanga-template.pdf");
+        window.parent.postMessage({ type: "done" }, "*");
       }
     });
+
+    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
-
-
-
