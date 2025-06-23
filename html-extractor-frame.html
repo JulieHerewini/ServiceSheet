@@ -2,22 +2,37 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Wix DOM Extractor</title>
+  <title>HTML Extractor Frame</title>
 </head>
 <body>
   <script>
-    window.addEventListener("message", async (event) => {
-      const { type, selector } = event.data || {};
-      if (type === "getOuterHTML") {
-        try {
-          const el = parent.document.querySelector(selector);
-          const html = el ? el.outerHTML : "<div>Not found</div>";
-          parent.postMessage({ type: "outerHTML", selector, html }, "*");
-        } catch (err) {
-          parent.postMessage({ type: "outerHTML", selector, html: "<div>Error extracting</div>" }, "*");
+    window.addEventListener("message", (event) => {
+      try {
+        const data = event.data;
+        if (data && data.type === "getOuterHTML" && data.selector) {
+          const el = window.parent.document.querySelector(data.selector);
+          if (el) {
+            const html = el.outerHTML;
+            event.source.postMessage({
+              type: "outerHTML",
+              selector: data.selector,
+              html: html
+            }, "*");
+          } else {
+            event.source.postMessage({
+              type: "outerHTML",
+              selector: data.selector,
+              html: "<!-- Selector not found -->"
+            }, "*");
+          }
         }
+      } catch (err) {
+        console.error("Extractor frame error:", err);
       }
     });
+
+    console.log("Extractor frame ready...");
   </script>
+  <p>Extractor frame ready...</p>
 </body>
 </html>
