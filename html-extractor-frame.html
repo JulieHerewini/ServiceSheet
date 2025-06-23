@@ -1,38 +1,47 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>HTML Extractor Frame</title>
+  <meta charset="UTF-8">
+  <title>Extractor Frame</title>
+  <style>
+    body {
+      background: white;
+      font-family: sans-serif;
+      font-size: 14px;
+      color: #333;
+    }
+  </style>
 </head>
 <body>
+  Extractor frame ready...
   <script>
-    window.addEventListener("message", (event) => {
-      try {
-        const data = event.data;
-        if (data && data.type === "getOuterHTML" && data.selector) {
-          const el = window.parent.document.querySelector(data.selector);
+    window.addEventListener("message", async (event) => {
+      const { type, selector } = event.data || {};
+      if (type === "getOuterHTML" && selector) {
+        try {
+          const el = window.parent.document.querySelector(selector);
           if (el) {
-            const html = el.outerHTML;
             event.source.postMessage({
               type: "outerHTML",
-              selector: data.selector,
-              html: html
+              selector,
+              html: el.outerHTML
             }, "*");
           } else {
             event.source.postMessage({
               type: "outerHTML",
-              selector: data.selector,
-              html: "<!-- Selector not found -->"
+              selector,
+              html: "<!-- Element not found -->"
             }, "*");
           }
+        } catch (err) {
+          event.source.postMessage({
+            type: "outerHTML",
+            selector,
+            html: "<!-- Error extracting HTML -->"
+          }, "*");
         }
-      } catch (err) {
-        console.error("Extractor frame error:", err);
       }
     });
-
-    console.log("Extractor frame ready...");
   </script>
-  <p>Extractor frame ready...</p>
 </body>
 </html>
