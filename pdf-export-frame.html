@@ -1,62 +1,155 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>PDF Export Frame</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <style>
-    body { margin: 0; font-family: sans-serif; background: white; }
-    .page-preview { display: none; width: 100%; height: 100%; padding: 20px; box-sizing: border-box; }
-    .active { display: block !important; }
-  </style>
-</head>
-<body>
-  <div id="coverPreviewBox" class="page-preview"></div>
-  <div id="orderPreviewBox" class="page-preview"></div>
-  <div id="backPreviewBox" class="page-preview"></div>
+import wixData from 'wix-data';
+import wixWindow from 'wix-window';
 
-  <script>
-    const { jsPDF } = window.jspdf;
-    const pages = [];
-    let currentIndex = 0;
-    const pageOrder = ["coverPreviewBox", "orderPreviewBox", "backPreviewBox"];
+const previewSelectors = {
+  cover: "#coverPreviewBox",
+  order: "#orderPreviewBox",
+  back: "#backPreviewBox"
+};
 
-    window.addEventListener("message", async (event) => {
-      const { type, pageId, orientation, html } = event.data || {};
+let currentPageIndex = 0;
+const flipPages = ["#coverPreviewBox", "#orderPreviewBox", "#backPreviewBox"];
+let extractedHtml = {};
 
-      if (type === "renderContent" && pageId && html) {
-        document.getElementById(pageId).innerHTML = html;
-      }
+function showPage(index) {
+  flipPages.forEach((selector, i) => {
+    const box = $w(selector);
+    if (i === index) box.show();
+    else box.hide();
+  });
+}
 
-      if (type === "request-screenshot") {
-        pageOrder.forEach(id => document.getElementById(id).classList.remove("active"));
-        const target = document.getElementById(pageId);
-        target.classList.add("active");
+function sendCurrentPageToIframe() {
+  const pageId = flipPages[currentPageIndex].replace("#", "");
+  const orientation = pageId === "orderPreviewBox" ? "landscape" : "portrait";
 
-        await new Promise(r => setTimeout(r, 300)); // Wait for transition/rendering
+  $w("#htmlPdfExportFrameFinal").postMessage({
+    type: "request-screenshot",
+    pageId,
+    orientation
+  });
+}
 
-        const canvas = await html2canvas(target);
-        pages.push({ canvas, orientation });
-
-        window.parent.postMessage({ type: "next-page" }, "*");
-      }
-
-      if (type === "render-complete") {
-        const doc = new jsPDF({ orientation: pages[0].orientation, unit: 'px', format: pages[0].orientation === 'landscape' ? 'a4' : 'a5' });
-
-        pages.forEach(({ canvas, orientation }, i) => {
-          const imgData = canvas.toDataURL("image/jpeg", 1.0);
-          if (i > 0) doc.addPage(orientation === 'landscape' ? 'a4' : 'a5', orientation);
-          doc.addImage(imgData, 'JPEG', 0, 0, orientation === 'landscape' ? 842 : 420, orientation === 'landscape' ? 595 : 595);
-        });
-
-        doc.save("tangihanga-template.pdf");
-        window.parent.postMessage({ type: "done" }, "*");
+async function extractHtmlFromPreview(selector, key) {
+  return new Promise((resolve) => {
+    $w("#htmlExtractorFrame").onMessage((event) => {
+      const data = event.data;
+      if (data?.type === "outerHTML" && data.selector === selector) {
+        extractedHtml[key] = data.html;
+        resolve();
       }
     });
+    $w("#htmlExtractorFrame").postMessage({ type: "getOuterHTML", selector });
+  });
+}
 
-    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
-  </script>
-</body>
-</html>
+$w.onReady(async () => {
+  $w("#downloadStatusText").hide();
+  $w("#downloadProgressBar").hide();
+  flipPages.forEach(id => $w(id).hide());
+
+  $w("#htmlPdfExportFrameFinal").onMessage(async (event) => {
+    const msg = event.data?.type;
+
+    if (msg === "pdf-frame-ready") {
+      // Extract actual visual HTML from visible Wix containers
+      await extractHtmlFromPreview(previewSelectors.cover, "coverPreviewBox");
+      await extractHtmlFromPreview(previewSelectors.order, "orderPreviewBox");
+      await extractHtmlFromPreview(previewSelectors.back, "backPreviewBox");
+
+      // Send that HTML to the GitHub PDF export iframe
+      Object.entries(extractedHtml).forEach(([pageId, html]) => {
+        $w("#htmlPdfExportFrameFinal").postMessage({
+          type: "renderContent",
+          pageId,
+          html
+        });
+      });
+
+      // Start screenshot + merge
+      currentPageIndex = 0;
+      showPage(currentPageIndex);
+      sendCurrentPageToIframe();
+    }
+
+    else if (msg === "next-page") {
+      currentPageIndex++;
+      if (currentPageIndex < flipPages.length) {
+        showPage(currentPageIndex);
+        setTimeout(() => sendCurrentPageToIframe(), 400);
+      } else {
+        $w("#htmlPdfExportFrameFinal").postMessage({ type: "render-complete" });
+      }
+    }
+
+    else if (msg === "done") {
+      $w("#downloadStatusText").text = "Download complete!";
+      $w("#downloadProgressBar").hide();
+      setTimeout(() => wixWindow.lightbox.close(), 2000);
+    }
+  });
+
+  const context = wixWindow.lightbox.getContext();
+  const templateId = context?.templateId;
+
+  if (!templateId) {
+    console.error("No templateId provided to PDFDownloadLightbox");
+    $w("#downloadStatusText").text = "Template not found.";
+    $w("#downloadStatusText").show();
+    return;
+  }
+
+  try {
+    const item = await wixData.get("FuneralServiceSheetTemplate", templateId);
+
+    // COVER
+    $w("#coverPageNameDisplay").text = item.name || "";
+    $w("#coverPageDatesDisplay").text = item.date || "";
+    $w("#coverPagePhotoDisplay").src = item.mainImage || "";
+
+    // ORDER
+    $w("#mihiSpeakerInput").text = item.mihi || "";
+    $w("#karakia1SpeakerInput").text = item.karakia || "";
+    $w("#readingSpeakerInput").text = item.readings || "";
+    $w("#eulogySpeakerInput").text = item.eulogy || "";
+    $w("#kauhauSpeakerInput").text = item.kauhau || "";
+    $w("#karakia2SpeakerInput").text = item.closingKarakia || "";
+
+    // WAIATA
+    for (let i = 1; i <= 4; i++) {
+      const waiataId = item[`waiata${i}`];
+      const htmlComp = $w(`#waiata${i}DisplayFrame`);
+      if (waiataId && htmlComp) {
+        try {
+          const waiataItem = await wixData.get("Waiata", waiataId);
+          const waiataHtml = waiataItem.waiataContent || "<p>No content</p>";
+          setTimeout(() => {
+            htmlComp.postMessage({ type: "renderContent", html: waiataHtml, pageId: htmlComp.id });
+          }, 500);
+          htmlComp.show();
+        } catch {
+          htmlComp.hide();
+        }
+      } else {
+        htmlComp.hide();
+      }
+    }
+
+    // BACK COVER
+    $w("#backCoverReceptionDisplay").text = item.receptionInfo || "";
+    if (Array.isArray(item.photos)) {
+      $w("#backCoverPhotoDisplay").items = item.photos.map(url => ({ type: "image", src: url }));
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Allow for full render
+
+    $w("#downloadStatusText").text = "Preparing download…";
+    $w("#downloadStatusText").show();
+    $w("#downloadProgressBar").show();
+
+  } catch (err) {
+    console.error("PDF Lightbox Error:", err);
+    $w("#downloadStatusText").text = "An unexpected error occurred.";
+    $w("#downloadStatusText").show();
+  }
+});
