@@ -1,47 +1,75 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
   <meta charset="UTF-8">
-  <title>Extractor Frame</title>
+  <title>Export to PDF</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     body {
       background: white;
+      margin: 0;
       font-family: sans-serif;
-      font-size: 14px;
-      color: #333;
+    }
+    .page {
+      width: 100%;
+      min-height: 100vh;
+      padding: 20px;
+      box-sizing: border-box;
     }
   </style>
 </head>
 <body>
-  Extractor frame ready...
+  <div id="pdfContainer"></div>
+
   <script>
+    const pages = [];
+    const pageOrientations = [];
+
     window.addEventListener("message", async (event) => {
-      const { type, selector } = event.data || {};
-      if (type === "getOuterHTML" && selector) {
-        try {
-          const el = window.parent.document.querySelector(selector);
-          if (el) {
-            event.source.postMessage({
-              type: "outerHTML",
-              selector,
-              html: el.outerHTML
-            }, "*");
-          } else {
-            event.source.postMessage({
-              type: "outerHTML",
-              selector,
-              html: "<!-- Element not found -->"
-            }, "*");
-          }
-        } catch (err) {
-          event.source.postMessage({
-            type: "outerHTML",
-            selector,
-            html: "<!-- Error extracting HTML -->"
-          }, "*");
-        }
+      const data = event.data;
+
+      if (data.type === "request-screenshot") {
+        // Do nothing – lightbox handles this now
+        return;
+      }
+
+      if (data.type === "renderContent") {
+        const container = document.createElement("div");
+        container.className = "page";
+        container.innerHTML = data.html;
+        document.getElementById("pdfContainer").appendChild(container);
+        pages.push(container);
+        pageOrientations.push(data.orientation || "portrait");
+
+      } else if (data.type === "render-complete") {
+        await generatePdf();
+        parent.postMessage({ type: "done" }, "*");
       }
     });
+
+    async function generatePdf() {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+
+      for (let i = 0; i < pages.length; i++) {
+        const canvas = await html2canvas(pages[i], { scale: 2 });
+        const imgData = canvas.toDataURL("image/png");
+        const orientation = pageOrientations[i] === "landscape" ? "l" : "p";
+
+        if (i > 0) {
+          pdf.addPage("a4", orientation);
+        }
+
+        pdf.setPage(i + 1);
+        pdf.addImage(imgData, "PNG", 0, 0, 595.28, 841.89); // A4 portrait size in pts
+      }
+
+      pdf.save("tangihanga-service-sheet.pdf");
+    }
+
+    // Let lightbox know we’re ready
+    parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
