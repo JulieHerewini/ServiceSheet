@@ -1,89 +1,98 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>PDF Export</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <title>Template Export</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     body {
       margin: 0;
       padding: 0;
       background: white;
-    }
-    .pdf-page {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
       font-family: sans-serif;
     }
-    #renderContainer {
-      width: 100%;
-      height: 100%;
+    .page {
+      display: none;
+      padding: 20px;
+      box-sizing: border-box;
+      background: white;
     }
-    .a5 {
+    .cover, .back {
       width: 420px;
       height: 595px;
     }
-    .a4-landscape {
+    .order {
       width: 842px;
       height: 595px;
+    }
+    .visible {
+      display: block !important;
     }
   </style>
 </head>
 <body>
-  <div id="renderContainer" class="pdf-page a5"></div>
+  <div id="coverPreviewBox" class="page cover"></div>
+  <div id="orderPreviewBox" class="page order"></div>
+  <div id="backPreviewBox" class="page back"></div>
 
   <script>
-    const { jsPDF } = window.jspdf;
-    const renderContainer = document.getElementById("renderContainer");
-    const pages = [];
-    const htmlMap = {};  // Store all html by pageId
+    const pages = {
+      coverPreviewBox: { el: document.getElementById("coverPreviewBox"), orientation: "portrait" },
+      orderPreviewBox: { el: document.getElementById("orderPreviewBox"), orientation: "landscape" },
+      backPreviewBox: { el: document.getElementById("backPreviewBox"), orientation: "portrait" }
+    };
+
+    let renderedCanvases = [];
 
     window.addEventListener("message", async (event) => {
-      const data = event.data;
-      if (!data || typeof data !== "object") return;
+      const msg = event.data;
 
-      if (data.type === "renderContent") {
-        // Store the pageId and its HTML
-        htmlMap[data.pageId] = data.html;
+      if (msg?.type === "request-screenshot") {
+        const { pageId } = msg;
+        for (const id in pages) pages[id].el.classList.remove("visible");
+        const page = pages[pageId];
+        if (!page) return;
 
-      } else if (data.type === "request-screenshot") {
-        const html = htmlMap[data.pageId];
-        if (!html) {
-          console.warn("No HTML for", data.pageId);
-          return;
+        page.el.classList.add("visible");
+
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for layout
+
+        const canvas = await html2canvas(page.el, { scale: 2 });
+        renderedCanvases.push({ canvas, orientation: page.orientation });
+
+        parent.postMessage({ type: "next-page" }, "*");
+      }
+
+      if (msg?.type === "renderContent") {
+        const { pageId, html } = msg;
+        if (pages[pageId]) {
+          pages[pageId].el.innerHTML = html;
         }
+      }
 
-        // Set correct page size
-        const format = data.orientation === "landscape" ? "a4-landscape" : "a5";
-        renderContainer.className = `pdf-page ${format}`;
-        renderContainer.innerHTML = html;
+      if (msg?.type === "render-complete") {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit: "px", format: "a5", orientation: "portrait" });
 
-        await new Promise(r => setTimeout(r, 400));  // Let it paint
-        html2canvas(renderContainer, { scale: 2 }).then(canvas => {
-          pages.push(canvas);
-          window.parent.postMessage({ type: "next-page" }, "*");
+        renderedCanvases.forEach((entry, i) => {
+          const imgData = entry.canvas.toDataURL("image/png");
+          const width = entry.orientation === "landscape" ? 842 : 420;
+          const height = 595;
+
+          if (i > 0) pdf.addPage([width, height], entry.orientation);
+          pdf.addImage(imgData, "PNG", 0, 0, width, height);
         });
 
-      } else if (data.type === "render-complete") {
-        const pdf = new jsPDF({ unit: "px", format: [420, 595] });
-        pages.forEach((canvas, index) => {
-          if (index > 0) pdf.addPage();
-          const img = canvas.toDataURL("image/png");
-          const width = canvas.width / 2;
-          const height = canvas.height / 2;
-          pdf.addImage(img, "PNG", 0, 0, width, height);
-        });
-
-        pdf.save("funeral-service-booklet.pdf");
-        window.parent.postMessage({ type: "done" }, "*");
+        pdf.save("tangihanga-template.pdf");
+        parent.postMessage({ type: "done" }, "*");
       }
     });
 
-    // Let parent know it's ready
-    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    // Notify Wix Lightbox we’re ready
+    window.onload = () => {
+      parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    };
   </script>
 </body>
 </html>
