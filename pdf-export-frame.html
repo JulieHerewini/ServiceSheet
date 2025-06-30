@@ -1,87 +1,80 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>PDF Export</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Export PDF</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
     body {
       margin: 0;
-      background: white;
+      font-family: sans-serif;
     }
-    .page-capture {
-      width: 794px;
-      height: 1123px;
-      overflow: hidden;
-      box-sizing: border-box;
+    .pdf-page {
+      width: 794px; /* A4 width at 96dpi */
+      height: 1123px; /* A4 height at 96dpi */
       padding: 20px;
+      box-sizing: border-box;
+      background: white;
+      overflow: hidden;
     }
-    #captureTarget {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .landscape {
+      width: 1123px;
+      height: 794px;
     }
   </style>
 </head>
 <body>
-  <div id="captureTarget" class="page-capture"></div>
-
+  <div id="captureArea" style="visibility: hidden; position: absolute; top: -9999px;"></div>
   <script>
-    const { jsPDF } = window.jspdf;
-    let pages = [];
-    let currentPageIndex = 0;
+    const pages = {};
+    let currentStep = 0;
 
-    function renderContent(html, pageId, orientation = "portrait") {
-      const container = document.getElementById("captureTarget");
-      container.innerHTML = html;
+    window.addEventListener("message", async (event) => {
+      const { type, pageId, html, orientation } = event.data || {};
 
-      // Allow rendering to complete
-      setTimeout(() => {
+      if (type === "renderContent") {
+        pages[pageId] = { html, orientation };
+      }
+
+      if (type === "request-screenshot") {
+        const { jsPDF } = window.jspdf;
+        const container = document.getElementById("captureArea");
+
+        container.innerHTML = pages[pageId]?.html || "<div>[Unsupported element]</div>";
+        container.className = "pdf-page" + (pages[pageId]?.orientation === "landscape" ? " landscape" : "");
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         html2canvas(container).then(canvas => {
-          pages.push({ image: canvas.toDataURL("image/jpeg", 1.0), orientation, pageId });
+          const imgData = canvas.toDataURL("image/jpeg", 1.0);
+
+          if (!window._pdfDoc) {
+            window._pdfDoc = new jsPDF(pages[pageId]?.orientation || "p", "pt", "a4");
+          } else {
+            window._pdfDoc.addPage();
+            window._pdfDoc.setPage(window._pdfDoc.getNumberOfPages());
+          }
+
+          window._pdfDoc.addImage(imgData, "JPEG", 0, 0);
           window.parent.postMessage({ type: "next-page" }, "*");
-        }).catch(err => {
-          console.error("❌ html2canvas error:", err);
         });
-      }, 500);
-    }
-
-    function buildPdf() {
-      if (!pages.length) return;
-
-      const first = pages[0];
-      const pdf = new jsPDF({
-        orientation: first.orientation || "portrait",
-        unit: "px",
-        format: [794, 1123]
-      });
-
-      pages.forEach((p, i) => {
-        if (i > 0) pdf.addPage([794, 1123], p.orientation);
-        pdf.addImage(p.image, "JPEG", 0, 0, 794, 1123);
-      });
-
-      pdf.save("tangihanga-template.pdf");
-      window.parent.postMessage({ type: "done" }, "*");
-    }
-
-    window.addEventListener("message", (event) => {
-      const data = event.data;
-
-      if (data.type === "request-screenshot") {
-        renderContent(data.html, data.pageId, data.orientation);
       }
 
-      if (data.type === "renderContent") {
-        renderContent(data.html, data.pageId, data.orientation);
+      if (type === "render-complete") {
+        if (window._pdfDoc) {
+          window._pdfDoc.save("tangihanga-template.pdf");
+        }
+        window.parent.postMessage({ type: "done" }, "*");
       }
 
-      if (data.type === "render-complete") {
-        buildPdf();
+      if (type === "ping") {
+        window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
       }
     });
 
-    // Tell the Lightbox it's ready to start
+    // Send ping once frame is ready
     window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
