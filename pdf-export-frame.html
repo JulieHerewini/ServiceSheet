@@ -1,87 +1,102 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>PDF Export Frame</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <meta charset="UTF-8">
+  <title>PDF Export Renderer</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
     body {
       margin: 0;
       padding: 0;
+      background: white;
     }
+
     .pdf-page {
-      display: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-family: sans-serif;
+    }
+
+    #renderContainer {
       width: 100%;
       height: 100%;
-      box-sizing: border-box;
-      padding: 20px;
     }
-    #coverPreviewBox, #backPreviewBox {
+
+    .a5 {
       width: 420px;
       height: 595px;
     }
-    #orderPreviewBox {
+
+    .a4-landscape {
       width: 842px;
       height: 595px;
+    }
+
+    .hidden {
+      display: none;
     }
   </style>
 </head>
 <body>
-  <div id="coverPreviewBox" class="pdf-page"></div>
-  <div id="orderPreviewBox" class="pdf-page"></div>
-  <div id="backPreviewBox" class="pdf-page"></div>
+  <div id="renderContainer" class="pdf-page a5"></div>
 
   <script>
     const { jsPDF } = window.jspdf;
+
     const pages = [];
-    let currentIndex = 0;
+    const renderContainer = document.getElementById("renderContainer");
 
     window.addEventListener("message", async (event) => {
-      const msg = event.data;
-      if (!msg?.type) return;
+      const data = event.data;
 
-      if (msg.type === "renderContent") {
-        const container = document.getElementById(msg.pageId);
-        if (container) {
-          container.innerHTML = msg.html;
-          container.style.display = "block";
+      if (!data || typeof data !== "object") return;
+
+      if (data.type === "request-screenshot") {
+        const format = data.orientation === "landscape" ? "a4-landscape" : "a5";
+        renderContainer.className = `pdf-page ${format}`;
+        renderContainer.innerHTML = ""; // Clear old content
+
+        const source = document.getElementById(data.pageId);
+        if (source) {
+          renderContainer.innerHTML = source.innerHTML;
         }
-      }
 
-      if (msg.type === "request-screenshot") {
-        const container = document.getElementById(msg.pageId);
-        if (container) {
-          await new Promise(res => setTimeout(res, 100)); // wait for DOM to settle
+        await new Promise(r => setTimeout(r, 400)); // Wait for DOM to update
 
-          html2canvas(container, { scale: 2 }).then(canvas => {
-            pages.push({ canvas, orientation: msg.orientation });
-            container.style.display = "none";
-            window.parent.postMessage({ type: "next-page" }, "*");
-          });
-        }
-      }
+        html2canvas(renderContainer, { scale: 2 }).then(canvas => {
+          pages.push(canvas);
+          window.parent.postMessage({ type: "next-page" }, "*");
+        });
 
-      if (msg.type === "render-complete") {
-        const pdf = new jsPDF({ orientation: pages[0].orientation, unit: "px", format: [pages[0].canvas.width, pages[0].canvas.height] });
+      } else if (data.type === "renderContent") {
+        const temp = document.createElement("div");
+        temp.id = data.pageId;
+        temp.innerHTML = data.html;
+        temp.classList.add("hidden");
+        document.body.appendChild(temp);
 
-        pages.forEach((page, i) => {
-          if (i !== 0) pdf.addPage([page.canvas.width, page.canvas.height], page.orientation);
-          const imgData = page.canvas.toDataURL("image/png");
-          pdf.addImage(imgData, 'PNG', 0, 0, page.canvas.width, page.canvas.height);
+      } else if (data.type === "render-complete") {
+        const pdf = new jsPDF({ unit: "px", format: [420, 595] });
+
+        pages.forEach((canvas, index) => {
+          if (index > 0) pdf.addPage();
+          const img = canvas.toDataURL("image/png");
+          const width = canvas.width / 2;
+          const height = canvas.height / 2;
+          pdf.addImage(img, "PNG", 0, 0, width, height);
         });
 
         pdf.save("funeral-service-booklet.pdf");
         window.parent.postMessage({ type: "done" }, "*");
       }
-
-      if (msg.type === "pdf-frame-ready") {
-        // Already handled by Lightbox
-      }
     });
 
-    // Notify lightbox that this iframe is ready to receive content
+    // Notify parent it's ready
     window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
+
