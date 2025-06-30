@@ -1,82 +1,70 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>PDF Export Frame</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
-    body {
-      margin: 0;
-      padding: 0;
-      background: #fff;
-    }
-    #renderArea {
-      position: relative;
+    body { margin: 0; padding: 0; }
+    .rendered-page {
       width: 100%;
       min-height: 100vh;
-      overflow: hidden;
-    }
-    .page {
-      display: none;
-      width: 100%;
-    }
-    .page.active {
-      display: block;
+      padding: 30px;
+      box-sizing: border-box;
     }
   </style>
 </head>
 <body>
-  <div id="renderArea"></div>
-
+  <div id="pageRenderer" class="rendered-page"></div>
   <script>
-    const pages = {};
-    const screenshots = [];
-    let currentPageId = null;
+    const { jsPDF } = window.jspdf;
+    const renderedPages = {};
+    let renderQueue = [];
 
-    window.addEventListener("message", async (event) => {
-      const { type, pageId, html, orientation } = event.data || {};
+    function receiveMessage(event) {
+      const msg = event.data;
+      if (!msg || !msg.type) return;
 
-      if (type === "renderContent") {
-        const div = document.createElement("div");
-        div.id = pageId;
-        div.className = "page";
-        div.innerHTML = html;
-        document.getElementById("renderArea").appendChild(div);
-        pages[pageId] = { orientation, element: div };
-
-      } else if (type === "request-screenshot") {
-        if (!pages[pageId]) return;
-
-        // Show only this page
-        Object.values(pages).forEach(p => p.element.classList.remove("active"));
-        pages[pageId].element.classList.add("active");
-        currentPageId = pageId;
-
-        await new Promise(r => setTimeout(r, 500)); // allow rendering
-
-        const canvas = await html2canvas(pages[pageId].element, { scale: 2 });
-        const imgData = canvas.toDataURL("image/jpeg", 1.0);
-        screenshots.push({ imgData, orientation });
-
-        parent.postMessage({ type: "next-page" }, "*");
-
-      } else if (type === "render-complete") {
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF();
-
-        screenshots.forEach(({ imgData, orientation }, i) => {
-          const isA4 = orientation === "landscape";
-          const [w, h] = isA4 ? [297, 210] : [148.5, 210];
-
-          if (i > 0) pdf.addPage([w, h], orientation);
-          pdf.addImage(imgData, 'JPEG', 0, 0, w, h);
-        });
-
-        pdf.save("tangihanga-template.pdf");
-        parent.postMessage({ type: "done" }, "*");
+      if (msg.type === "request-screenshot") {
+        parent.postMessage({ type: "pdf-frame-ready" }, "*");
       }
-    });
+
+      else if (msg.type === "renderContent") {
+        const { pageId, html } = msg;
+        renderedPages[pageId] = html;
+      }
+
+      else if (msg.type === "render-complete") {
+        renderQueue = Object.entries(renderedPages);
+        renderNextPage([]);
+      }
+    }
+
+    async function renderNextPage(images) {
+      if (renderQueue.length === 0) {
+        const pdf = new jsPDF();
+        images.forEach((img, index) => {
+          if (index > 0) pdf.addPage();
+          pdf.addImage(img, "PNG", 10, 10, 190, 277);
+        });
+        pdf.save("Tangihanga_Template.pdf");
+        parent.postMessage({ type: "done" }, "*");
+        return;
+      }
+
+      const [pageId, html] = renderQueue.shift();
+      const container = document.getElementById("pageRenderer");
+      container.innerHTML = html;
+
+      await new Promise(r => setTimeout(r, 300));
+
+      const canvas = await html2canvas(container);
+      const imgData = canvas.toDataURL("image/png");
+      renderNextPage([...images, imgData]);
+    }
+
+    window.addEventListener("message", receiveMessage);
   </script>
 </body>
 </html>
