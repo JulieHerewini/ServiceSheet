@@ -6,103 +6,72 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
-    body {
-      margin: 0;
-      padding: 0;
-      background: white;
-    }
-
+    body { margin: 0; padding: 0; }
     .rendered-page {
+      width: 100%;
+      min-height: 100vh;
       box-sizing: border-box;
-      overflow: hidden;
-      page-break-after: always;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      padding: 20px;
+      font-family: sans-serif;
     }
-
-    .a5-portrait {
-      width: 420pt;
-      height: 595pt;
-    }
-
-    .a4-landscape {
-      width: 841.89pt;
-      height: 595.28pt;
-    }
-
-    #pageContainer {
-      display: flex;
-      flex-direction: column;
-    }
+    .a5 { width: 148mm; height: 210mm; }
+    .a4-landscape { width: 297mm; height: 210mm; }
   </style>
 </head>
 <body>
-  <div id="pageContainer"></div>
+  <div id="renderArea"></div>
 
   <script>
-    const { jsPDF } = window.jspdf;
-    const pageContainer = document.getElementById("pageContainer");
-
-    const pages = {};
-    const pageOrder = [];
-    const pageSizes = {
-      coverPreviewBox: { width: 420, height: 595, class: "a5-portrait" },
-      orderPreviewBox: { width: 841.89, height: 595.28, class: "a4-landscape" },
-      backPreviewBox: { width: 420, height: 595, class: "a5-portrait" }
-    };
+    const renderArea = document.getElementById("renderArea");
+    let pages = [];
+    let currentIndex = 0;
 
     window.addEventListener("message", async (event) => {
-      const data = event.data;
+      const { type, pageId, html, orientation } = event.data || {};
 
-      if (data?.type === "renderContent" && data.pageId && data.html) {
-        const size = pageSizes[data.pageId] || pageSizes.coverPreviewBox;
+      if (type === "renderContent") {
         const wrapper = document.createElement("div");
-        wrapper.className = `rendered-page ${size.class}`;
-        wrapper.id = `rendered-${data.pageId}`;
-        wrapper.innerHTML = data.html;
-
-        pages[data.pageId] = { element: wrapper, size };
-        pageOrder.push(data.pageId);
-        console.log(`Injected ${data.pageId}`);
+        wrapper.className = `rendered-page ${orientation === "landscape" ? "a4-landscape" : "a5"}`;
+        wrapper.id = pageId;
+        wrapper.innerHTML = html || "<div>No content</div>";
+        renderArea.appendChild(wrapper);
+        pages.push(wrapper);
       }
 
-      if (data?.type === "render-complete") {
-        pageOrder.forEach(id => {
-          const page = pages[id];
-          pageContainer.appendChild(page.element);
-        });
-        console.log("All pages appended. Generating PDF...");
-        await generatePDF();
+      if (type === "render-complete") {
+        await generatePdf();
       }
 
-      if (data?.type === "request-screenshot") {
-        event.source.postMessage({ type: "pdf-frame-ready" }, "*");
+      if (type === "request-screenshot") {
+        parent.postMessage({ type: "next-page" }, "*");
       }
     });
 
-    async function generatePDF() {
-      const pdf = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+    async function generatePdf() {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF();
 
-      for (let i = 0; i < pageOrder.length; i++) {
-        const pageId = pageOrder[i];
-        const { element, size } = pages[pageId];
-
-        const canvas = await html2canvas(element, {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        const canvas = await html2canvas(page, {
           scale: 2,
-          useCORS: true
+          backgroundColor: "#ffffff"
         });
-
         const imgData = canvas.toDataURL("image/jpeg", 1.0);
-        if (i > 0) pdf.addPage([size.width, size.height]);
+        const orientation = page.classList.contains("a4-landscape") ? "landscape" : "portrait";
+        const width = orientation === "landscape" ? 297 : 148;
+        const height = 210;
+
+        if (i !== 0) pdf.addPage([width, height], orientation);
         pdf.setPage(i + 1);
-        pdf.addImage(imgData, "JPEG", 0, 0, size.width, size.height);
-        console.log(`Rendered ${pageId}`);
+        pdf.addImage(imgData, "JPEG", 0, 0, width, height);
       }
 
       pdf.save("funeral-service-booklet.pdf");
-      window.parent.postMessage({ type: "done" }, "*");
+      parent.postMessage({ type: "done" }, "*");
     }
+
+    parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
