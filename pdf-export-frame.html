@@ -1,81 +1,87 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Export PDF</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <meta charset="UTF-8" />
+  <title>PDF Export Frame</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     body {
       margin: 0;
       font-family: sans-serif;
     }
-    .pdf-page {
-      width: 794px; /* A4 width at 96dpi */
-      height: 1123px; /* A4 height at 96dpi */
-      padding: 20px;
+    .page {
+      width: 100%;
+      height: 100%;
       box-sizing: border-box;
-      background: white;
-      overflow: hidden;
+    }
+    .portrait {
+      width: 148mm;
+      height: 210mm;
     }
     .landscape {
-      width: 1123px;
-      height: 794px;
+      width: 297mm;
+      height: 210mm;
     }
   </style>
 </head>
 <body>
-  <div id="captureArea" style="visibility: hidden; position: absolute; top: -9999px;"></div>
   <script>
+    const { jsPDF } = window.jspdf;
     const pages = {};
-    let currentStep = 0;
+    const orientations = {};
 
     window.addEventListener("message", async (event) => {
-      const { type, pageId, html, orientation } = event.data || {};
+      const msg = event.data;
 
-      if (type === "renderContent") {
-        pages[pageId] = { html, orientation };
+      if (msg.type === "renderContent") {
+        const container = document.createElement("div");
+        container.className = `page ${msg.orientation || 'portrait'}`;
+        container.id = msg.pageId;
+        container.innerHTML = msg.html;
+        document.body.appendChild(container);
+        pages[msg.pageId] = container;
+        orientations[msg.pageId] = msg.orientation;
+
+        setTimeout(() => {
+          parent.postMessage({ type: "waiata-ready", pageId: msg.pageId }, "*");
+        }, 300);
       }
 
-      if (type === "request-screenshot") {
-        const { jsPDF } = window.jspdf;
-        const container = document.getElementById("captureArea");
-
-        container.innerHTML = pages[pageId]?.html || "<div>[Unsupported element]</div>";
-        container.className = "pdf-page" + (pages[pageId]?.orientation === "landscape" ? " landscape" : "");
+      if (msg.type === "request-screenshot") {
+        const page = pages[msg.pageId];
+        if (!page) return;
 
         await new Promise(resolve => setTimeout(resolve, 100));
-
-        html2canvas(container).then(canvas => {
-          const imgData = canvas.toDataURL("image/jpeg", 1.0);
-
-          if (!window._pdfDoc) {
-            window._pdfDoc = new jsPDF(pages[pageId]?.orientation || "p", "pt", "a4");
-          } else {
-            window._pdfDoc.addPage();
-            window._pdfDoc.setPage(window._pdfDoc.getNumberOfPages());
-          }
-
-          window._pdfDoc.addImage(imgData, "JPEG", 0, 0);
-          window.parent.postMessage({ type: "next-page" }, "*");
+        html2canvas(page).then(canvas => {
+          const imgData = canvas.toDataURL("image/png");
+          page.dataset.img = imgData;
+          parent.postMessage({ type: "next-page" }, "*");
         });
       }
 
-      if (type === "render-complete") {
-        if (window._pdfDoc) {
-          window._pdfDoc.save("tangihanga-template.pdf");
-        }
-        window.parent.postMessage({ type: "done" }, "*");
-      }
+      if (msg.type === "render-complete") {
+        const pdf = new jsPDF({ unit: "mm", format: "a5" });
+        const keys = Object.keys(pages);
 
-      if (type === "ping") {
-        window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
+        keys.forEach((key, index) => {
+          const imgData = pages[key].dataset.img;
+          const orientation = orientations[key];
+
+          const isLandscape = orientation === "landscape";
+          const width = isLandscape ? 297 : 148;
+          const height = 210;
+
+          if (index !== 0) pdf.addPage([width, height], orientation);
+          pdf.addImage(imgData, "PNG", 0, 0, width, height);
+        });
+
+        pdf.save("tangihanga-template.pdf");
+        parent.postMessage({ type: "done" }, "*");
       }
     });
 
-    // Send ping once frame is ready
-    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
