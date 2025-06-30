@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>PDF Export Renderer</title>
+  <title>PDF Export</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
@@ -11,7 +11,6 @@
       padding: 0;
       background: white;
     }
-
     .pdf-page {
       display: flex;
       align-items: center;
@@ -19,24 +18,17 @@
       overflow: hidden;
       font-family: sans-serif;
     }
-
     #renderContainer {
       width: 100%;
       height: 100%;
     }
-
     .a5 {
       width: 420px;
       height: 595px;
     }
-
     .a4-landscape {
       width: 842px;
       height: 595px;
-    }
-
-    .hidden {
-      display: none;
     }
   </style>
 </head>
@@ -45,42 +37,38 @@
 
   <script>
     const { jsPDF } = window.jspdf;
-
-    const pages = [];
     const renderContainer = document.getElementById("renderContainer");
+    const pages = [];
+    const htmlMap = {};  // Store all html by pageId
 
     window.addEventListener("message", async (event) => {
       const data = event.data;
-
       if (!data || typeof data !== "object") return;
 
-      if (data.type === "request-screenshot") {
-        const format = data.orientation === "landscape" ? "a4-landscape" : "a5";
-        renderContainer.className = `pdf-page ${format}`;
-        renderContainer.innerHTML = ""; // Clear old content
+      if (data.type === "renderContent") {
+        // Store the pageId and its HTML
+        htmlMap[data.pageId] = data.html;
 
-        const source = document.getElementById(data.pageId);
-        if (source) {
-          renderContainer.innerHTML = source.innerHTML;
+      } else if (data.type === "request-screenshot") {
+        const html = htmlMap[data.pageId];
+        if (!html) {
+          console.warn("No HTML for", data.pageId);
+          return;
         }
 
-        await new Promise(r => setTimeout(r, 400)); // Wait for DOM to update
+        // Set correct page size
+        const format = data.orientation === "landscape" ? "a4-landscape" : "a5";
+        renderContainer.className = `pdf-page ${format}`;
+        renderContainer.innerHTML = html;
 
+        await new Promise(r => setTimeout(r, 400));  // Let it paint
         html2canvas(renderContainer, { scale: 2 }).then(canvas => {
           pages.push(canvas);
           window.parent.postMessage({ type: "next-page" }, "*");
         });
 
-      } else if (data.type === "renderContent") {
-        const temp = document.createElement("div");
-        temp.id = data.pageId;
-        temp.innerHTML = data.html;
-        temp.classList.add("hidden");
-        document.body.appendChild(temp);
-
       } else if (data.type === "render-complete") {
         const pdf = new jsPDF({ unit: "px", format: [420, 595] });
-
         pages.forEach((canvas, index) => {
           if (index > 0) pdf.addPage();
           const img = canvas.toDataURL("image/png");
@@ -94,7 +82,7 @@
       }
     });
 
-    // Notify parent it's ready
+    // Let parent know it's ready
     window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
