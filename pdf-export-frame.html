@@ -10,61 +10,58 @@
     .rendered-page {
       width: 100%;
       min-height: 100vh;
-      padding: 30px;
-      box-sizing: border-box;
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      page-break-after: always;
     }
   </style>
 </head>
 <body>
-  <div id="pageRenderer" class="rendered-page"></div>
   <script>
-    const { jsPDF } = window.jspdf;
-    const renderedPages = {};
-    let renderQueue = [];
+    window.addEventListener("message", async (event) => {
+      if (event.data?.type === "request-screenshot") {
+        const { pageId, orientation } = event.data;
+        const target = document.querySelector(`#${pageId}`);
+        if (!target) return;
 
-    function receiveMessage(event) {
-      const msg = event.data;
-      if (!msg || !msg.type) return;
+        const canvas = await html2canvas(target);
+        const imgData = canvas.toDataURL("image/jpeg");
 
-      if (msg.type === "request-screenshot") {
-        parent.postMessage({ type: "pdf-frame-ready" }, "*");
+        const page = document.createElement("div");
+        page.className = "rendered-page";
+        page.style.backgroundImage = `url(${imgData})`;
+        document.body.appendChild(page);
+
+        parent.postMessage({ type: "next-page" }, "*");
       }
 
-      else if (msg.type === "renderContent") {
-        const { pageId, html } = msg;
-        renderedPages[pageId] = html;
+      else if (event.data?.type === "renderContent") {
+        const { pageId, html } = event.data;
+        const container = document.createElement("div");
+        container.id = pageId;
+        container.innerHTML = html;
+        container.style.display = "none";
+        document.body.appendChild(container);
       }
 
-      else if (msg.type === "render-complete") {
-        renderQueue = Object.entries(renderedPages);
-        renderNextPage([]);
-      }
-    }
+      else if (event.data?.type === "render-complete") {
+        const pages = document.querySelectorAll(".rendered-page");
+        const pdf = new jspdf.jsPDF("p", "pt", "a4");
 
-    async function renderNextPage(images) {
-      if (renderQueue.length === 0) {
-        const pdf = new jsPDF();
-        images.forEach((img, index) => {
-          if (index > 0) pdf.addPage();
-          pdf.addImage(img, "PNG", 10, 10, 190, 277);
+        pages.forEach((page, i) => {
+          const img = page.style.backgroundImage.slice(5, -2);
+          if (i > 0) pdf.addPage();
+          pdf.addImage(img, "JPEG", 0, 0, 595.28, 841.89);
         });
-        pdf.save("Tangihanga_Template.pdf");
+
+        pdf.save("funeral-service-booklet.pdf");
         parent.postMessage({ type: "done" }, "*");
-        return;
       }
+    });
 
-      const [pageId, html] = renderQueue.shift();
-      const container = document.getElementById("pageRenderer");
-      container.innerHTML = html;
-
-      await new Promise(r => setTimeout(r, 300));
-
-      const canvas = await html2canvas(container);
-      const imgData = canvas.toDataURL("image/png");
-      renderNextPage([...images, imgData]);
-    }
-
-    window.addEventListener("message", receiveMessage);
+    // Let the Lightbox know the frame is ready
+    parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
