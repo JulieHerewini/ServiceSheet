@@ -15,15 +15,35 @@
       background-position: center;
       page-break-after: always;
     }
+    .hidden-capture {
+      position: absolute;
+      top: -9999px;
+      left: -9999px;
+    }
   </style>
 </head>
 <body>
   <script>
+    const capturedPages = [];
+
     window.addEventListener("message", async (event) => {
-      if (event.data?.type === "request-screenshot") {
-        const { pageId, orientation } = event.data;
-        const target = document.querySelector(`#${pageId}`);
+      if (event.data?.type === "renderContent") {
+        const { pageId, html } = event.data;
+        const container = document.createElement("div");
+        container.id = pageId;
+        container.innerHTML = html;
+        container.className = "hidden-capture";
+        document.body.appendChild(container);
+      }
+
+      else if (event.data?.type === "request-screenshot") {
+        const { pageId } = event.data;
+        const target = document.getElementById(pageId);
         if (!target) return;
+
+        target.style.display = "block";
+
+        await new Promise(res => setTimeout(res, 400)); // allow time for layout
 
         const canvas = await html2canvas(target);
         const imgData = canvas.toDataURL("image/jpeg");
@@ -33,16 +53,9 @@
         page.style.backgroundImage = `url(${imgData})`;
         document.body.appendChild(page);
 
-        parent.postMessage({ type: "next-page" }, "*");
-      }
+        target.style.display = "none";
 
-      else if (event.data?.type === "renderContent") {
-        const { pageId, html } = event.data;
-        const container = document.createElement("div");
-        container.id = pageId;
-        container.innerHTML = html;
-        container.style.display = "none";
-        document.body.appendChild(container);
+        parent.postMessage({ type: "next-page" }, "*");
       }
 
       else if (event.data?.type === "render-complete") {
@@ -60,7 +73,7 @@
       }
     });
 
-    // Let the Lightbox know the frame is ready
+    // Notify Lightbox that the export frame is ready
     parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
