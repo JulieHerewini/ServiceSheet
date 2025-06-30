@@ -1,78 +1,92 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
   <meta charset="UTF-8" />
   <title>PDF Export Frame</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
-    body { margin: 0; padding: 0; }
-    .rendered-page {
-      width: 100%;
-      min-height: 100vh;
-      box-sizing: border-box;
-      padding: 20px;
-      font-family: sans-serif;
+    body {
+      margin: 0;
+      overflow: hidden;
     }
-    .a5 { width: 148mm; height: 210mm; }
-    .a4-landscape { width: 297mm; height: 210mm; }
+    .page {
+      display: none;
+    }
+    .rendering {
+      display: block;
+    }
   </style>
 </head>
 <body>
-  <div id="renderArea"></div>
+  <div id="coverPreviewBox" class="page" style="width: 420px; height: 595px;"></div> <!-- A5 portrait -->
+  <div id="orderPreviewBox" class="page" style="width: 842px; height: 595px;"></div> <!-- A4 landscape -->
+  <div id="backPreviewBox" class="page" style="width: 420px; height: 595px;"></div> <!-- A5 portrait -->
 
   <script>
-    const renderArea = document.getElementById("renderArea");
-    let pages = [];
-    let currentIndex = 0;
+    const pages = ["coverPreviewBox", "orderPreviewBox", "backPreviewBox"];
+    const pageSizes = {
+      coverPreviewBox: [148, 210],   // A5 portrait in mm
+      orderPreviewBox: [297, 210],   // A4 landscape in mm
+      backPreviewBox: [148, 210]     // A5 portrait in mm
+    };
+    const htmlStore = {};
 
     window.addEventListener("message", async (event) => {
-      const { type, pageId, html, orientation } = event.data || {};
+      const msg = event.data;
 
-      if (type === "renderContent") {
-        const wrapper = document.createElement("div");
-        wrapper.className = `rendered-page ${orientation === "landscape" ? "a4-landscape" : "a5"}`;
-        wrapper.id = pageId;
-        wrapper.innerHTML = html || "<div>No content</div>";
-        renderArea.appendChild(wrapper);
-        pages.push(wrapper);
+      if (msg?.type === "renderContent" && msg.pageId && msg.html) {
+        const container = document.getElementById(msg.pageId);
+        if (container) {
+          container.innerHTML = msg.html;
+        }
       }
 
-      if (type === "render-complete") {
-        await generatePdf();
+      if (msg?.type === "render-complete") {
+        generatePDF();
       }
 
-      if (type === "request-screenshot") {
-        parent.postMessage({ type: "next-page" }, "*");
+      if (msg?.type === "request-screenshot") {
+        const { pageId } = msg;
+        pages.forEach(id => {
+          document.getElementById(id).classList.remove("rendering");
+        });
+        const el = document.getElementById(pageId);
+        if (el) {
+          el.classList.add("rendering");
+          setTimeout(async () => {
+            await captureAndStore(pageId, el);
+            parent.postMessage({ type: "next-page" }, "*");
+          }, 500);
+        }
       }
     });
 
-    async function generatePdf() {
+    async function captureAndStore(pageId, element) {
+      const canvas = await html2canvas(element, { scale: 2 });
+      htmlStore[pageId] = canvas.toDataURL("image/png");
+    }
+
+    async function generatePDF() {
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF();
 
-      for (let i = 0; i < pages.length; i++) {
-        const page = pages[i];
-        const canvas = await html2canvas(page, {
-          scale: 2,
-          backgroundColor: "#ffffff"
-        });
-        const imgData = canvas.toDataURL("image/jpeg", 1.0);
-        const orientation = page.classList.contains("a4-landscape") ? "landscape" : "portrait";
-        const width = orientation === "landscape" ? 297 : 148;
-        const height = 210;
-
-        if (i !== 0) pdf.addPage([width, height], orientation);
-        pdf.setPage(i + 1);
-        pdf.addImage(imgData, "JPEG", 0, 0, width, height);
+      let first = true;
+      for (const id of pages) {
+        const img = htmlStore[id];
+        const [w, h] = pageSizes[id]; // mm
+        if (!first) pdf.addPage([w, h], "portrait");
+        pdf.setPage(pages.indexOf(id) + 1);
+        pdf.addImage(img, "PNG", 0, 0, w, h);
+        first = false;
       }
 
-      pdf.save("funeral-service-booklet.pdf");
+      pdf.save("ServiceSheet.pdf");
       parent.postMessage({ type: "done" }, "*");
     }
 
-    parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    // Notify lightbox that we're ready
+    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
-
