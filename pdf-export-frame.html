@@ -1,127 +1,95 @@
-"<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Export PDF</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <title>PDF Export</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
     body {
       margin: 0;
+      padding: 0;
       font-family: sans-serif;
     }
     .page {
-      width: 794px;  /* A4 height in landscape */
-      height: 1123px; /* A4 width in landscape */
+      width: 794px;
+      height: 1123px;
       padding: 20px;
       box-sizing: border-box;
       background: white;
+      margin: 0 auto;
     }
-    #captureContainer {
-      display: flex;
-      justify-content: center;
-      align-items: center;
+    .landscape {
+      width: 1123px;
+      height: 794px;
+    }
+    .page-break {
+      page-break-after: always;
     }
   </style>
 </head>
 <body>
-  <div id="captureContainer">
-    <div id="renderTarget" class="page"></div>
-  </div>
-
+  <div id="pages"></div>
   <script>
     const { jsPDF } = window.jspdf;
-    let currentPdf = new jsPDF();
-    let pageQueue = [];
-    let isRendering = false;
+    const pageElements = {};
+    let pendingRenders = 0;
 
-    function clean(html) {
-      return html.replace(/\n/g, '').replace(/\s+/g, ' ');
+    function createPageContainer(pageId, html, orientation = 'portrait') {
+      const pageDiv = document.createElement('div');
+      pageDiv.className = 'page page-break';
+      if (orientation === 'landscape') {
+        pageDiv.classList.add('landscape');
+      }
+      pageDiv.id = `rendered-${pageId}`;
+      pageDiv.innerHTML = html;
+      document.getElementById('pages').appendChild(pageDiv);
     }
 
-    function renderHtmlToCanvas(html, orientation) {
-      return new Promise((resolve) => {
-        const container = document.getElementById("renderTarget");
-        container.innerHTML = clean(html);
+    function renderAllPages() {
+      const pdf = new jsPDF();
+      const pages = document.querySelectorAll('.page');
 
-        // Wait for repeater images to load
-        const images = container.querySelectorAll("#exportRepeaterImage img");
-        let loadedCount = 0;
-        if (images.length === 0) {
-          setTimeout(() => {
-            html2canvas(container, { scale: 2 }).then(canvas => resolve(canvas));
-          }, 100);
-        } else {
-          images.forEach((img) => {
-            img.onload = () => {
-              loadedCount++;
-              if (loadedCount === images.length) {
-                setTimeout(() => {
-                  html2canvas(container, { scale: 2 }).then(canvas => resolve(canvas));
-                }, 100);
-              }
-            };
-            img.onerror = () => {
-              loadedCount++;
-              if (loadedCount === images.length) {
-                setTimeout(() => {
-                  html2canvas(container, { scale: 2 }).then(canvas => resolve(canvas));
-                }, 100);
-              }
-            };
-          });
-        }
+      const renderPromises = Array.from(pages).map((page, index) => {
+        return html2canvas(page, { scale: 2 }).then(canvas => {
+          const imgData = canvas.toDataURL('image/jpeg', 1.0);
+          const orientation = page.classList.contains('landscape') ? 'l' : 'p';
+
+          if (index > 0) pdf.addPage(orientation);
+          pdf.setPage(index + 1);
+          const width = orientation === 'l' ? 297 : 210;
+          const height = orientation === 'l' ? 210 : 297;
+          pdf.addImage(imgData, 'JPEG', 0, 0, width, height);
+        });
+      });
+
+      Promise.all(renderPromises).then(() => {
+        pdf.save('template-download.pdf');
+        parent.postMessage({ type: 'done' }, '*');
       });
     }
 
-    function addCanvasToPdf(canvas, orientation, isLast) {
-      const imgData = canvas.toDataURL("image/jpeg", 1.0);
-      const width = orientation === "landscape" ? 297 : 210;
-      const height = orientation === "landscape" ? 210 : 297;
-      const pageWidth = currentPdf.internal.pageSize.getWidth();
-      const pageHeight = currentPdf.internal.pageSize.getHeight();
-      const ratio = Math.min(width / canvas.width, height / canvas.height);
-      const imgWidth = canvas.width * ratio;
-      const imgHeight = canvas.height * ratio;
-      const x = (pageWidth - imgWidth) / 2;
-      const y = (pageHeight - imgHeight) / 2;
-
-      currentPdf.addImage(imgData, "JPEG", x, y, imgWidth, imgHeight);
-      if (!isLast) currentPdf.addPage();
-    }
-
-    async function renderAllPages() {
-      for (let i = 0; i < pageQueue.length; i++) {
-        const { html, orientation } = pageQueue[i];
-        const canvas = await renderHtmlToCanvas(html, orientation);
-        addCanvasToPdf(canvas, orientation, i === pageQueue.length - 1);
-      }
-
-      currentPdf.save("tangihanga-template.pdf");
-      parent.postMessage({ type: "done" }, "*");
-    }
-
-    window.addEventListener("message", async (event) => {
+    window.addEventListener('message', (event) => {
       const data = event.data;
+      if (!data || !data.type) return;
 
-      if (data?.type === "renderContent") {
-        pageQueue.push({ html: data.html, orientation: data.pageId === "orderPreviewBox" ? "landscape" : "portrait" });
-        parent.postMessage({ type: "next-page" }, "*");
+      if (data.type === 'request-screenshot') {
+        const orientation = data.orientation || 'portrait';
+        parent.postMessage({ type: 'next-page' }, '*');
       }
 
-      if (data?.type === "render-pdf") {
-        isRendering = true;
+      else if (data.type === 'renderContent') {
+        const { pageId, html } = data;
+        const orientation = pageId === 'orderPreviewBox' ? 'landscape' : 'portrait';
+        createPageContainer(pageId, html, orientation);
+      }
+
+      else if (data.type === 'render-complete') {
         renderAllPages();
-      }
-
-      if (data?.type === "request-screenshot") {
-        parent.postMessage({ type: "next-page" }, "*");
       }
     });
 
-    window.onload = () => {
-      parent.postMessage({ type: "pdf-frame-ready" }, "*");
-    };
+    window.parent.postMessage({ type: 'pdf-frame-ready' }, '*');
   </script>
 </body>
 </html>
