@@ -1,84 +1,90 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>PDF Export Frame</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
     body {
       margin: 0;
       padding: 0;
     }
-    .pdf-page {
+    #renderTarget {
       width: 100%;
-      min-height: 100vh;
+      height: 100%;
+      overflow: hidden;
+      display: none;
     }
   </style>
 </head>
 <body>
-  <div id="pdfContainer"></div>
+  <div id="renderTarget"></div>
 
   <script>
-    const { jsPDF } = window.jspdf;
-    const pages = [];
-
-    function sanitizeHtml(html) {
-      if (typeof html !== 'string') return '';
-      return html.replace(/<script.*?>.*?<\/script>/gi, '').trim();
-    }
-
-    function getPageSize(pageId) {
-      if (pageId === 'orderPreviewBox') return { width: 297, height: 210, orientation: 'l' }; // A4 landscape
-      return { width: 148, height: 210, orientation: 'p' }; // A5 portrait default
-    }
+    const renderTarget = document.getElementById('renderTarget');
+    const pages = {};
+    let currentRender = 0;
+    let rendering = false;
 
     window.addEventListener("message", async (event) => {
-      const { type, pageId, html } = event.data || {};
+      const { type, pageId, html, orientation } = event.data || {};
 
-      if (type === "renderContent" && html && pageId) {
-        const container = document.createElement("div");
-        container.className = "pdf-page";
-        container.innerHTML = sanitizeHtml(html);
-        document.body.appendChild(container);
-
-        await new Promise(res => setTimeout(res, 500));
-
-        const canvas = await html2canvas(container, {
-          scale: 2,
-          windowWidth: container.scrollWidth,
-          windowHeight: container.scrollHeight
-        });
-
-        pages.push({ canvas, pageId });
-        document.body.removeChild(container);
-        parent.postMessage({ type: "next-page" }, "*");
+      if (type === "renderContent" && pageId && html) {
+        pages[pageId] = { html, orientation };
       }
 
-      else if (type === "render-complete") {
-        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a5' });
-
-        pages.forEach(({ canvas, pageId }, index) => {
-          const { width, height, orientation } = getPageSize(pageId);
-          const imgData = canvas.toDataURL("image/png");
-
-          if (index > 0) pdf.addPage([width, height], orientation);
-          pdf.setPage(index + 1);
-          pdf.addImage(imgData, 'PNG', 0, 0, width, height);
-        });
-
-        pdf.save("tangihanga-template.pdf");
-        parent.postMessage({ type: "done" }, "*");
+      if (type === "request-screenshot") {
+        window.parent.postMessage({ type: "next-page" }, "*");
       }
 
-      else if (type === "ping") {
-        parent.postMessage({ type: "pdf-frame-ready" }, "*");
+      if (type === "render-complete") {
+        if (rendering) return;
+        rendering = true;
+
+        const pdfPages = Object.entries(pages).map(([key, { html, orientation }]) => {
+          const pageDiv = document.createElement("div");
+          pageDiv.innerHTML = html;
+          pageDiv.style.pageBreakAfter = "always";
+          pageDiv.style.width = orientation === "landscape" ? "842px" : "595px";
+          pageDiv.style.height = orientation === "landscape" ? "595px" : "842px";
+          pageDiv.style.overflow = "hidden";
+          pageDiv.style.boxSizing = "border-box";
+          return pageDiv;
+        });
+
+        renderTarget.innerHTML = "";
+        pdfPages.forEach(page => renderTarget.appendChild(page));
+        renderTarget.style.display = "block";
+
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for DOM render
+
+        const opt = {
+          margin: 0,
+          filename: 'tangihanga-template.pdf',
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            logging: true,
+            windowWidth: 1200
+          },
+          jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' }
+        };
+
+        html2pdf().from(renderTarget).set(opt).save().then(() => {
+          window.parent.postMessage({ type: "done" }, "*");
+        }).catch(err => {
+          console.error("❌ PDF generation failed:", err);
+          window.parent.postMessage({ type: "done" }, "*");
+        });
       }
     });
 
-    parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    // Notify Lightbox ready
+    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
+
 
 
