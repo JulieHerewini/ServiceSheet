@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>PDF Export Frame</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -9,33 +9,16 @@
     body {
       margin: 0;
       padding: 0;
-      background: #fff;
     }
-
     .pdf-page {
-      box-sizing: border-box;
-      padding: 0;
-      margin: 0 auto;
-      background: #fff;
-      overflow: hidden;
-    }
-
-    .a5 {
-      width: 148mm;
-      height: 210mm;
-    }
-
-    .a4-landscape {
-      width: 297mm;
-      height: 210mm;
-    }
-
-    * {
-      font-family: Arial, sans-serif;
+      width: 100%;
+      min-height: 100vh;
     }
   </style>
 </head>
 <body>
+  <div id="pdfContainer"></div>
+
   <script>
     const { jsPDF } = window.jspdf;
     const pages = [];
@@ -46,26 +29,25 @@
     }
 
     function getPageSize(pageId) {
-      if (pageId === 'orderPreviewBox') return { width: 297, height: 210, orientation: 'l', className: 'a4-landscape' };
-      return { width: 148, height: 210, orientation: 'p', className: 'a5' };
+      if (pageId === 'orderPreviewBox') return { width: 297, height: 210, orientation: 'l' }; // A4 landscape
+      return { width: 148, height: 210, orientation: 'p' }; // A5 portrait default
     }
 
     window.addEventListener("message", async (event) => {
       const { type, pageId, html } = event.data || {};
 
       if (type === "renderContent" && html && pageId) {
-        const { className } = getPageSize(pageId);
         const container = document.createElement("div");
-        container.className = `pdf-page ${className}`;
+        container.className = "pdf-page";
         container.innerHTML = sanitizeHtml(html);
         document.body.appendChild(container);
 
-        await new Promise(res => setTimeout(res, 600)); // allow styles to load
+        await new Promise(res => setTimeout(res, 500));
 
         const canvas = await html2canvas(container, {
           scale: 2,
-          backgroundColor: '#ffffff',
-          useCORS: true
+          windowWidth: container.scrollWidth,
+          windowHeight: container.scrollHeight
         });
 
         pages.push({ canvas, pageId });
@@ -74,7 +56,7 @@
       }
 
       else if (type === "render-complete") {
-        const pdf = new jsPDF();
+        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a5' });
 
         pages.forEach(({ canvas, pageId }, index) => {
           const { width, height, orientation } = getPageSize(pageId);
