@@ -43,7 +43,7 @@
         showOnly(msg.pageId);
         setTimeout(() => {
           window.parent.postMessage({ type: "next-page" }, "*");
-        }, 500);
+        }, 600);
       }
 
       if (msg.type === "renderContent") {
@@ -62,14 +62,27 @@
           for (let i = 0; i < pageOrder.length; i++) {
             const pageId = pageOrder[i];
             const element = document.getElementById(pageId);
-            if (!element) continue;
+            if (!element || !renderedPages[pageId]) continue;
 
             const canvas = await html2canvas(element, {
               scale: 2,
               useCORS: true
             });
 
+            const width = canvas.width;
+            const height = canvas.height;
+
+            if (width === 0 || height === 0) {
+              console.warn(`Skipping ${pageId} due to 0 size`);
+              continue;
+            }
+
             const imgData = canvas.toDataURL("image/png");
+            if (!imgData.startsWith("data:image/")) {
+              console.error(`Invalid image data from canvas for ${pageId}`);
+              continue;
+            }
+
             const imgProps = pdf.getImageProperties(imgData);
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
