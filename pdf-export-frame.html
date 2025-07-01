@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>PDF Export</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -32,8 +32,6 @@
   <div id="pages"></div>
   <script>
     const { jsPDF } = window.jspdf;
-    const pageElements = {};
-    let pendingRenders = 0;
 
     function createPageContainer(pageId, html, orientation = 'portrait') {
       const pageDiv = document.createElement('div');
@@ -54,7 +52,6 @@
         return html2canvas(page, { scale: 2 }).then(canvas => {
           const imgData = canvas.toDataURL('image/jpeg', 1.0);
           const orientation = page.classList.contains('landscape') ? 'l' : 'p';
-
           if (index > 0) pdf.addPage(orientation);
           pdf.setPage(index + 1);
           const width = orientation === 'l' ? 297 : 210;
@@ -69,22 +66,32 @@
       });
     }
 
+    const pageOrder = ['coverPreviewBox', 'orderPreviewBox', 'backCoverPreviewBox'];
+    let currentPageIndex = 0;
+
     window.addEventListener('message', (event) => {
       const data = event.data;
       if (!data || !data.type) return;
 
-      if (data.type === 'request-screenshot') {
-        const orientation = data.orientation || 'portrait';
-        parent.postMessage({ type: 'next-page' }, '*');
+      if (data.type === 'pdf-frame-ready') {
+        // Start requesting content
+        parent.postMessage({ type: 'request-screenshot', pageId: pageOrder[currentPageIndex] }, '*');
       }
 
-      else if (data.type === 'renderContent') {
+      if (data.type === 'renderContent') {
         const { pageId, html } = data;
         const orientation = pageId === 'orderPreviewBox' ? 'landscape' : 'portrait';
         createPageContainer(pageId, html, orientation);
+
+        currentPageIndex++;
+        if (currentPageIndex < pageOrder.length) {
+          parent.postMessage({ type: 'request-screenshot', pageId: pageOrder[currentPageIndex] }, '*');
+        } else {
+          parent.postMessage({ type: 'render-complete' }, '*');
+        }
       }
 
-      else if (data.type === 'render-complete') {
+      if (data.type === 'render-complete') {
         renderAllPages();
       }
     });
@@ -93,8 +100,6 @@
   </script>
 </body>
 </html>
-
-
 
 
 
