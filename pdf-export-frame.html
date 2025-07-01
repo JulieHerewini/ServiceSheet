@@ -1,101 +1,70 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>PDF Export</title>
+  <meta charset="UTF-8">
+  <title>PDF Export Iframe</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
-    body {
-      margin: 0;
-      padding: 0;
-      font-family: sans-serif;
-    }
-    .page {
-      width: 794px;
-      height: 1123px;
+    body { margin: 0; font-family: sans-serif; }
+    .pdf-page {
+      width: 100%;
       padding: 20px;
       box-sizing: border-box;
-      background: white;
-      margin: 0 auto;
-      overflow: hidden;
-    }
-    .landscape {
-      width: 1123px;
-      height: 794px;
-    }
-    .page-break {
-      page-break-after: always;
     }
   </style>
 </head>
 <body>
-  <div id="pages"></div>
+  <div id="pdfContainer"></div>
+
   <script>
-    const { jsPDF } = window.jspdf;
+    const pages = [];
+    const orientations = [];
+    let currentIndex = 0;
 
-    function createPageContainer(pageId, html, orientation = 'portrait') {
-      const pageDiv = document.createElement('div');
-      pageDiv.className = 'page page-break';
-      if (orientation === 'landscape') {
-        pageDiv.classList.add('landscape');
-      }
-      pageDiv.id = `rendered-${pageId}`;
-      pageDiv.innerHTML = html;
-      document.getElementById('pages').appendChild(pageDiv);
-    }
-
-    function renderAllPages() {
-      const pdf = new jsPDF();
-      const pages = document.querySelectorAll('.page');
-
-      const renderPromises = Array.from(pages).map((page, index) => {
-        return html2canvas(page, { scale: 2 }).then(canvas => {
-          const imgData = canvas.toDataURL('image/jpeg', 1.0);
-          const orientation = page.classList.contains('landscape') ? 'l' : 'p';
-          if (index > 0) pdf.addPage(orientation);
-          pdf.setPage(index + 1);
-          const width = orientation === 'l' ? 297 : 210;
-          const height = orientation === 'l' ? 210 : 297;
-          pdf.addImage(imgData, 'JPEG', 0, 0, width, height);
-        });
-      });
-
-      Promise.all(renderPromises).then(() => {
-        pdf.save('tangihanga-template.pdf');
-        parent.postMessage({ type: 'done' }, '*');
-      });
-    }
-
-    const pageOrder = ['coverPreviewBox', 'orderPreviewBox', 'backPreviewBox'];
-    let currentPageIndex = 0;
-
-    window.addEventListener('message', (event) => {
+    window.addEventListener("message", async (event) => {
       const data = event.data;
       if (!data || !data.type) return;
 
-      if (data.type === 'pdf-frame-ready') {
-        parent.postMessage({ type: 'request-screenshot', pageId: pageOrder[currentPageIndex] }, '*');
+      if (data.type === "pdf-frame-ready") {
+        parent.postMessage({ type: "pdf-frame-ready" }, "*");
       }
 
-      if (data.type === 'renderContent') {
-        const { pageId, html, orientation } = data;
-        createPageContainer(pageId, html, orientation || 'portrait');
-        currentPageIndex++;
-        if (currentPageIndex < pageOrder.length) {
-          parent.postMessage({ type: 'next-page' }, '*');
-        } else {
-          parent.postMessage({ type: 'render-complete' }, '*');
+      if (data.type === "renderContent") {
+        const container = document.getElementById("pdfContainer");
+        const wrapper = document.createElement("div");
+        wrapper.className = "pdf-page";
+        wrapper.innerHTML = data.html || "<div>empty</div>";
+        wrapper.id = data.pageId;
+        container.appendChild(wrapper);
+        pages.push(wrapper);
+        orientations.push(data.orientation || "portrait");
+        parent.postMessage({ type: "next-page" }, "*");
+      }
+
+      if (data.type === "render-complete") {
+        try {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ orientation: orientations[0] || "portrait", unit: "px", format: "a4" });
+
+          for (let i = 0; i < pages.length; i++) {
+            const canvas = await html2canvas(pages[i], { scale: 2 });
+            const imgData = canvas.toDataURL("image/jpeg", 1.0);
+            const pageOrientation = orientations[i] || "portrait";
+            const pageSize = pageOrientation === "landscape" ? [842, 595] : [595, 842];
+
+            if (i > 0) doc.addPage(...pageSize, pageOrientation);
+            doc.addImage(imgData, "JPEG", 0, 0, pageSize[0], pageSize[1]);
+          }
+
+          doc.save("tangihanga-template.pdf");
+          parent.postMessage({ type: "done" }, "*");
+        } catch (err) {
+          console.error("PDF generation error:", err);
+          parent.postMessage({ type: "done" }, "*");
         }
       }
-
-      if (data.type === 'render-complete') {
-        renderAllPages();
-      }
     });
-
-    // Kick things off
-    window.parent.postMessage({ type: 'pdf-frame-ready' }, '*');
   </script>
 </body>
 </html>
