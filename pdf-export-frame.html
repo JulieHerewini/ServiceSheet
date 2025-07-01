@@ -19,6 +19,7 @@
       box-sizing: border-box;
       background: white;
       margin: 0 auto;
+      display: none;
     }
     .landscape {
       width: 1123px;
@@ -30,34 +31,32 @@
   </style>
 </head>
 <body>
-  <!-- Placeholder for visibility only -->
-  <div id="coverPreviewBox" class="page page-break">Cover Preview</div>
-  <div id="orderPreviewBox" class="page page-break landscape" style="display:none;">Order of Service</div>
-  <div id="backPreviewBox" class="page page-break" style="display:none;">Back Cover</div>
+  <div id="coverPreviewBox" class="page page-break"></div>
+  <div id="orderPreviewBox" class="page page-break landscape"></div>
+  <div id="backPreviewBox" class="page page-break"></div>
 
   <script>
     const { jsPDF } = window.jspdf;
     const pages = [];
 
-    // Receive messages from Lightbox
     window.addEventListener("message", async (event) => {
       const data = event.data;
       if (!data || !data.type) return;
 
       if (data.type === "request-screenshot") {
         const { pageId, orientation } = data;
-        console.log("📥 Received screenshot request:", pageId, orientation);
+        console.log("📥 Screenshot request received:", pageId, orientation);
 
         const target = document.getElementById(pageId);
         if (!target) {
-          console.warn("❌ Could not find page element:", pageId);
+          console.warn("❌ Could not find element for", pageId);
           pages.push({ img: null, orientation });
           parent.postMessage({ type: "next-page" }, "*");
           return;
         }
 
-        // Temporarily show only this target
-        Array.from(document.querySelectorAll(".page")).forEach(p => p.style.display = "none");
+        // Show only the target page
+        document.querySelectorAll(".page").forEach(p => p.style.display = "none");
         target.style.display = "block";
 
         try {
@@ -66,15 +65,16 @@
           pages.push({ img: imgData, orientation });
           parent.postMessage({ type: "next-page" }, "*");
         } catch (err) {
-          console.error("❌ Error capturing screenshot:", err);
+          console.error("❌ Error capturing canvas:", err);
           pages.push({ img: null, orientation });
           parent.postMessage({ type: "next-page" }, "*");
         }
       }
 
       if (data.type === "render-complete") {
-        console.log("📦 Rendering all pages to PDF...");
+        console.log("📦 Rendering all pages into PDF...");
         const pdf = new jsPDF();
+
         pages.forEach((page, index) => {
           const { img, orientation } = page;
           if (!img) return;
@@ -92,7 +92,6 @@
       }
     });
 
-    // Notify Lightbox when iframe is ready
     window.addEventListener("load", () => {
       console.log("✅ iframe fully loaded, sending pdf-frame-ready");
       parent.postMessage({ type: "pdf-frame-ready" }, "*");
