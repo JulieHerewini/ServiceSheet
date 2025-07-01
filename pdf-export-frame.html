@@ -10,7 +10,6 @@
       margin: 0;
       padding: 0;
       font-family: sans-serif;
-      background: #fff;
     }
     .page {
       width: 794px;
@@ -19,7 +18,6 @@
       box-sizing: border-box;
       background: white;
       margin: 0 auto;
-      display: block;
     }
     .landscape {
       width: 1123px;
@@ -32,67 +30,76 @@
 </head>
 <body>
   <div id="pages"></div>
-
   <script>
     const { jsPDF } = window.jspdf;
-    const pages = [];
 
-    window.addEventListener("message", (event) => {
+    function createPageContainer(pageId, html, orientation = 'portrait') {
+      const pageDiv = document.createElement('div');
+      pageDiv.className = 'page page-break';
+      if (orientation === 'landscape') pageDiv.classList.add('landscape');
+      pageDiv.id = `rendered-${pageId}`;
+      pageDiv.innerHTML = html;
+      document.getElementById('pages').appendChild(pageDiv);
+    }
+
+    function renderAllPages() {
+      const pdf = new jsPDF();
+      const pages = document.querySelectorAll('.page');
+
+      const renderPromises = Array.from(pages).map((page, index) => {
+        return html2canvas(page, { scale: 2 }).then(canvas => {
+          const imgData = canvas.toDataURL('image/jpeg', 1.0);
+          const orientation = page.classList.contains('landscape') ? 'l' : 'p';
+          if (index > 0) pdf.addPage(orientation);
+          pdf.setPage(index + 1);
+          const width = orientation === 'l' ? 297 : 210;
+          const height = orientation === 'l' ? 210 : 297;
+          pdf.addImage(imgData, 'JPEG', 0, 0, width, height);
+        });
+      });
+
+      Promise.all(renderPromises).then(() => {
+        pdf.save('template-download.pdf');
+        parent.postMessage({ type: 'done' }, '*');
+      });
+    }
+
+    const pageOrder = ['#coverPreviewBox', '#orderPreviewBox', '#backPreviewBox'];
+    let currentPageIndex = 0;
+
+    window.addEventListener('message', (event) => {
       const data = event.data;
       if (!data || !data.type) return;
 
-      // 👇 Receive HTML for one page
-      if (data.type === "renderContent") {
-        const { pageId, html, orientation } = data;
+      if (data.type === 'pdf-frame-ready') {
+        parent.postMessage({ type: 'next-page' }, '*');
+      }
 
-        const pageDiv = document.createElement("div");
-        pageDiv.className = "page page-break";
-        if (orientation === "landscape") {
-          pageDiv.classList.add("landscape");
+      if (data.type === 'capture-page') {
+        const { pageId, orientation } = data;
+        const el = document.querySelector(pageId);
+        if (!el) {
+          console.warn('Element not found for capture:', pageId);
+          parent.postMessage({ type: 'next-page' }, '*');
+          return;
         }
-        pageDiv.id = `rendered-${pageId}`;
-        pageDiv.innerHTML = html;
-
-        document.getElementById("pages").appendChild(pageDiv);
-
-        pages.push({ id: pageId, orientation });
-        parent.postMessage({ type: "next-page" }, "*");
+        createPageContainer(pageId.replace("#", ""), el.outerHTML, orientation);
+        currentPageIndex++;
+        if (currentPageIndex < pageOrder.length) {
+          parent.postMessage({ type: 'next-page' }, '*');
+        } else {
+          parent.postMessage({ type: 'render-pdf' }, '*');
+        }
       }
 
-      // 👇 Final PDF generation
-      if (data.type === "render-complete") {
-        console.log("📦 Starting PDF render...");
-        const pdf = new jsPDF();
-
-        const pageElements = document.querySelectorAll(".page");
-        const renderTasks = Array.from(pageElements).map((element, index) => {
-          const isLandscape = element.classList.contains("landscape");
-          const width = isLandscape ? 1123 : 794;
-          const height = isLandscape ? 794 : 1123;
-          const pdfWidth = isLandscape ? 297 : 210;
-          const pdfHeight = isLandscape ? 210 : 297;
-
-          return html2canvas(element, { scale: 2, width, height }).then(canvas => {
-            const imgData = canvas.toDataURL("image/jpeg", 1.0);
-            if (index > 0) pdf.addPage(isLandscape ? "l" : "p");
-            pdf.setPage(index + 1);
-            pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-          });
-        });
-
-        Promise.all(renderTasks).then(() => {
-          pdf.save("template-download.pdf");
-          parent.postMessage({ type: "done" }, "*");
-        });
+      if (data.type === 'render-pdf') {
+        renderAllPages();
       }
     });
 
-    // 👇 Notify Lightbox this iframe is ready
-    window.addEventListener("load", () => {
-      console.log("✅ iframe fully loaded, sending pdf-frame-ready");
-      parent.postMessage({ type: "pdf-frame-ready" }, "*");
-    });
+    window.parent.postMessage({ type: 'pdf-frame-ready' }, '*');
   </script>
 </body>
 </html>
+
 
