@@ -2,72 +2,73 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>PDF Export Iframe</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <title>PDF Export Frame</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
-    body { margin: 0; font-family: sans-serif; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+    }
     .pdf-page {
-      width: 100%;
+      width: 794px;
+      height: 1123px;
       padding: 20px;
       box-sizing: border-box;
+      page-break-after: always;
     }
   </style>
 </head>
 <body>
-  <div id="pdfContainer"></div>
+  <div id="pdf-root"></div>
 
   <script>
     const pages = [];
-    const orientations = [];
-    let currentIndex = 0;
 
     window.addEventListener("message", async (event) => {
-      const data = event.data;
-      if (!data || !data.type) return;
+      const msg = event.data;
 
-      if (data.type === "pdf-frame-ready") {
+      if (msg?.type === "pdf-frame-ready") {
         parent.postMessage({ type: "pdf-frame-ready" }, "*");
       }
 
-      if (data.type === "renderContent") {
-        const container = document.getElementById("pdfContainer");
-        const wrapper = document.createElement("div");
-        wrapper.className = "pdf-page";
-        wrapper.innerHTML = data.html || "<div>empty</div>";
-        wrapper.id = data.pageId;
-        container.appendChild(wrapper);
-        pages.push(wrapper);
-        orientations.push(data.orientation || "portrait");
+      if (msg?.type === "renderContent") {
+        const container = document.createElement("div");
+        container.className = "pdf-page";
+        container.innerHTML = msg.html || "<div>[No content]</div>";
+        container.dataset.pageId = msg.pageId;
+        container.dataset.orientation = msg.orientation || "portrait";
+        document.getElementById("pdf-root").appendChild(container);
+        pages.push(container);
+
         parent.postMessage({ type: "next-page" }, "*");
       }
 
-      if (data.type === "render-complete") {
-        try {
-          const { jsPDF } = window.jspdf;
-          const doc = new jsPDF({ orientation: orientations[0] || "portrait", unit: "px", format: "a4" });
+      if (msg?.type === "render-complete") {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF();
 
-          for (let i = 0; i < pages.length; i++) {
-            const canvas = await html2canvas(pages[i], { scale: 2 });
-            const imgData = canvas.toDataURL("image/jpeg", 1.0);
-            const pageOrientation = orientations[i] || "portrait";
-            const pageSize = pageOrientation === "landscape" ? [842, 595] : [595, 842];
+        for (let i = 0; i < pages.length; i++) {
+          const canvas = await html2canvas(pages[i], { scale: 2 });
+          const imgData = canvas.toDataURL("image/jpeg", 1.0);
 
-            if (i > 0) doc.addPage(...pageSize, pageOrientation);
-            doc.addImage(imgData, "JPEG", 0, 0, pageSize[0], pageSize[1]);
-          }
+          const orientation = pages[i].dataset.orientation;
+          const format = orientation === "landscape" ? [1123, 794] : [794, 1123];
 
-          doc.save("tangihanga-template.pdf");
-          parent.postMessage({ type: "done" }, "*");
-        } catch (err) {
-          console.error("PDF generation error:", err);
-          parent.postMessage({ type: "done" }, "*");
+          if (i !== 0) pdf.addPage(format, orientation);
+          pdf.setPage(i + 1);
+          pdf.addImage(imgData, "JPEG", 0, 0, format[0], format[1]);
         }
+
+        pdf.save("Tangihanga-Service-Sheet.pdf");
+        parent.postMessage({ type: "done" }, "*");
       }
     });
   </script>
 </body>
 </html>
+
 
 
 
