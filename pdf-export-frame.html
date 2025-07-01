@@ -9,65 +9,88 @@
     body {
       margin: 0;
       padding: 0;
-      font-family: sans-serif;
     }
     .pdf-page {
-      width: 794px;
-      height: 1123px;
+      width: 100%;
+      min-height: 100vh;
       padding: 20px;
       box-sizing: border-box;
-      page-break-after: always;
+    }
+    #coverPreviewBox, #orderPreviewBox, #backPreviewBox {
+      display: none;
     }
   </style>
 </head>
 <body>
-  <div id="pdf-root"></div>
+  <div id="coverPreviewBox" class="pdf-page"></div>
+  <div id="orderPreviewBox" class="pdf-page"></div>
+  <div id="backPreviewBox" class="pdf-page"></div>
 
   <script>
-    const pages = [];
+    const pageOrder = ["coverPreviewBox", "orderPreviewBox", "backPreviewBox"];
+    let renderedPages = {};
+
+    function showOnly(id) {
+      pageOrder.forEach(pid => {
+        document.getElementById(pid).style.display = pid === id ? "block" : "none";
+      });
+    }
 
     window.addEventListener("message", async (event) => {
       const msg = event.data;
 
-      if (msg?.type === "pdf-frame-ready") {
-        parent.postMessage({ type: "pdf-frame-ready" }, "*");
+      if (msg.type === "request-screenshot") {
+        showOnly(msg.pageId);
+        setTimeout(() => {
+          window.parent.postMessage({ type: "next-page" }, "*");
+        }, 500);
       }
 
-      if (msg?.type === "renderContent") {
-        const container = document.createElement("div");
-        container.className = "pdf-page";
-        container.innerHTML = msg.html || "<div>[No content]</div>";
-        container.dataset.pageId = msg.pageId;
-        container.dataset.orientation = msg.orientation || "portrait";
-        document.getElementById("pdf-root").appendChild(container);
-        pages.push(container);
-
-        parent.postMessage({ type: "next-page" }, "*");
-      }
-
-      if (msg?.type === "render-complete") {
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF();
-
-        for (let i = 0; i < pages.length; i++) {
-          const canvas = await html2canvas(pages[i], { scale: 2 });
-          const imgData = canvas.toDataURL("image/jpeg", 1.0);
-
-          const orientation = pages[i].dataset.orientation;
-          const format = orientation === "landscape" ? [1123, 794] : [794, 1123];
-
-          if (i !== 0) pdf.addPage(format, orientation);
-          pdf.setPage(i + 1);
-          pdf.addImage(imgData, "JPEG", 0, 0, format[0], format[1]);
+      if (msg.type === "renderContent") {
+        const pageDiv = document.getElementById(msg.pageId);
+        if (pageDiv) {
+          pageDiv.innerHTML = msg.html;
+          renderedPages[msg.pageId] = true;
         }
+      }
 
-        pdf.save("Tangihanga-Service-Sheet.pdf");
-        parent.postMessage({ type: "done" }, "*");
+      if (msg.type === "render-complete") {
+        try {
+          const { jsPDF } = window.jspdf;
+          const pdf = new jsPDF();
+
+          for (let i = 0; i < pageOrder.length; i++) {
+            const pageId = pageOrder[i];
+            const element = document.getElementById(pageId);
+            if (!element) continue;
+
+            const canvas = await html2canvas(element, {
+              scale: 2,
+              useCORS: true
+            });
+
+            const imgData = canvas.toDataURL("image/png");
+            const imgProps = pdf.getImageProperties(imgData);
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+            if (i > 0) pdf.addPage();
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+          }
+
+          pdf.save("funeral-template.pdf");
+          window.parent.postMessage({ type: "done" }, "*");
+        } catch (err) {
+          console.error("PDF generation error:", err);
+        }
       }
     });
+
+    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
 </body>
 </html>
+
 
 
 
