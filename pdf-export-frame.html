@@ -19,7 +19,7 @@
       box-sizing: border-box;
       background: white;
       margin: 0 auto;
-      display: none;
+      display: block;
     }
     .landscape {
       width: 1123px;
@@ -31,67 +31,63 @@
   </style>
 </head>
 <body>
-  <div id="coverPreviewBox" class="page page-break"></div>
-  <div id="orderPreviewBox" class="page page-break landscape"></div>
-  <div id="backPreviewBox" class="page page-break"></div>
+  <div id="pages"></div>
 
   <script>
     const { jsPDF } = window.jspdf;
     const pages = [];
 
-    window.addEventListener("message", async (event) => {
+    window.addEventListener("message", (event) => {
       const data = event.data;
       if (!data || !data.type) return;
 
-      if (data.type === "request-screenshot") {
-        const { pageId, orientation } = data;
-        console.log("📥 Screenshot request received:", pageId, orientation);
+      // 👇 Receive HTML for one page
+      if (data.type === "renderContent") {
+        const { pageId, html, orientation } = data;
 
-        const target = document.getElementById(pageId);
-        if (!target) {
-          console.warn("❌ Could not find element for", pageId);
-          pages.push({ img: null, orientation });
-          parent.postMessage({ type: "next-page" }, "*");
-          return;
+        const pageDiv = document.createElement("div");
+        pageDiv.className = "page page-break";
+        if (orientation === "landscape") {
+          pageDiv.classList.add("landscape");
         }
+        pageDiv.id = `rendered-${pageId}`;
+        pageDiv.innerHTML = html;
 
-        // Show only the target page
-        document.querySelectorAll(".page").forEach(p => p.style.display = "none");
-        target.style.display = "block";
+        document.getElementById("pages").appendChild(pageDiv);
 
-        try {
-          const canvas = await html2canvas(target, { scale: 2 });
-          const imgData = canvas.toDataURL("image/jpeg", 1.0);
-          pages.push({ img: imgData, orientation });
-          parent.postMessage({ type: "next-page" }, "*");
-        } catch (err) {
-          console.error("❌ Error capturing canvas:", err);
-          pages.push({ img: null, orientation });
-          parent.postMessage({ type: "next-page" }, "*");
-        }
+        pages.push({ id: pageId, orientation });
+        parent.postMessage({ type: "next-page" }, "*");
       }
 
+      // 👇 Final PDF generation
       if (data.type === "render-complete") {
-        console.log("📦 Rendering all pages into PDF...");
+        console.log("📦 Starting PDF render...");
         const pdf = new jsPDF();
 
-        pages.forEach((page, index) => {
-          const { img, orientation } = page;
-          if (!img) return;
+        const pageElements = document.querySelectorAll(".page");
+        const renderTasks = Array.from(pageElements).map((element, index) => {
+          const isLandscape = element.classList.contains("landscape");
+          const width = isLandscape ? 1123 : 794;
+          const height = isLandscape ? 794 : 1123;
+          const pdfWidth = isLandscape ? 297 : 210;
+          const pdfHeight = isLandscape ? 210 : 297;
 
-          if (index > 0) pdf.addPage(orientation === "landscape" ? "l" : "p");
-          pdf.setPage(index + 1);
-
-          const width = orientation === "landscape" ? 297 : 210;
-          const height = orientation === "landscape" ? 210 : 297;
-          pdf.addImage(img, "JPEG", 0, 0, width, height);
+          return html2canvas(element, { scale: 2, width, height }).then(canvas => {
+            const imgData = canvas.toDataURL("image/jpeg", 1.0);
+            if (index > 0) pdf.addPage(isLandscape ? "l" : "p");
+            pdf.setPage(index + 1);
+            pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+          });
         });
 
-        pdf.save("template-download.pdf");
-        parent.postMessage({ type: "done" }, "*");
+        Promise.all(renderTasks).then(() => {
+          pdf.save("template-download.pdf");
+          parent.postMessage({ type: "done" }, "*");
+        });
       }
     });
 
+    // 👇 Notify Lightbox this iframe is ready
     window.addEventListener("load", () => {
       console.log("✅ iframe fully loaded, sending pdf-frame-ready");
       parent.postMessage({ type: "pdf-frame-ready" }, "*");
@@ -99,3 +95,4 @@
   </script>
 </body>
 </html>
+
