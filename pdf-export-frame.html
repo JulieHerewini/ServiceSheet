@@ -1,105 +1,51 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>PDF Export</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      font-family: sans-serif;
-    }
-    .page {
-      width: 794px;
-      height: 1123px;
-      padding: 20px;
-      box-sizing: border-box;
-      background: white;
-      margin: 0 auto;
-    }
-    .landscape {
-      width: 1123px;
-      height: 794px;
-    }
-    .page-break {
-      page-break-after: always;
-    }
-  </style>
-</head>
-<body>
-  <div id="pages"></div>
-  <script>
-    const { jsPDF } = window.jspdf;
+<script>
+  const { jsPDF } = window.jspdf;
+  const pages = [];
 
-    function createPageContainer(pageId, html, orientation = 'portrait') {
-      const pageDiv = document.createElement('div');
-      pageDiv.className = 'page page-break';
-      if (orientation === 'landscape') {
-        pageDiv.classList.add('landscape');
+  window.addEventListener("message", async (event) => {
+    const data = event.data;
+    if (!data || !data.type) return;
+
+    if (data.type === "request-screenshot") {
+      const { pageId, orientation } = data;
+
+      const target = document.getElementById(pageId);
+      if (!target) {
+        pages.push({ img: null, orientation }); // Push empty if missing
+        parent.postMessage({ type: "next-page" }, "*");
+        return;
       }
-      pageDiv.id = `rendered-${pageId}`;
-      pageDiv.innerHTML = html;
-      document.getElementById('pages').appendChild(pageDiv);
+
+      try {
+        const canvas = await html2canvas(target, { scale: 2 });
+        const imgData = canvas.toDataURL("image/jpeg", 1.0);
+        pages.push({ img: imgData, orientation });
+        parent.postMessage({ type: "next-page" }, "*");
+      } catch (err) {
+        console.error("Error capturing screenshot:", err);
+        pages.push({ img: null, orientation });
+        parent.postMessage({ type: "next-page" }, "*");
+      }
     }
 
-    function renderAllPages() {
+    if (data.type === "render-complete") {
       const pdf = new jsPDF();
-      const pages = document.querySelectorAll('.page');
+      pages.forEach((page, index) => {
+        const { img, orientation } = page;
+        if (!img) return;
 
-      const renderPromises = Array.from(pages).map((page, index) => {
-        return html2canvas(page, { scale: 2 }).then(canvas => {
-          const imgData = canvas.toDataURL('image/jpeg', 1.0);
-          const orientation = page.classList.contains('landscape') ? 'l' : 'p';
-          if (index > 0) pdf.addPage(orientation);
-          pdf.setPage(index + 1);
-          const width = orientation === 'l' ? 297 : 210;
-          const height = orientation === 'l' ? 210 : 297;
-          pdf.addImage(imgData, 'JPEG', 0, 0, width, height);
-        });
+        if (index > 0) pdf.addPage(orientation === "landscape" ? "l" : "p");
+        pdf.setPage(index + 1);
+
+        const width = orientation === "landscape" ? 297 : 210;
+        const height = orientation === "landscape" ? 210 : 297;
+        pdf.addImage(img, "JPEG", 0, 0, width, height);
       });
 
-      Promise.all(renderPromises).then(() => {
-        pdf.save('template-download.pdf');
-        parent.postMessage({ type: 'done' }, '*');
-      });
+      pdf.save("template-download.pdf");
+      parent.postMessage({ type: "done" }, "*");
     }
+  });
 
-    const pageOrder = ['coverPreviewBox', 'orderPreviewBox', 'backCoverPreviewBox'];
-    let currentPageIndex = 0;
-
-    window.addEventListener('message', (event) => {
-      const data = event.data;
-      if (!data || !data.type) return;
-
-      if (data.type === 'pdf-frame-ready') {
-        // Start requesting content
-        parent.postMessage({ type: 'request-screenshot', pageId: pageOrder[currentPageIndex] }, '*');
-      }
-
-      if (data.type === 'renderContent') {
-        const { pageId, html } = data;
-        const orientation = pageId === 'orderPreviewBox' ? 'landscape' : 'portrait';
-        createPageContainer(pageId, html, orientation);
-
-        currentPageIndex++;
-        if (currentPageIndex < pageOrder.length) {
-          parent.postMessage({ type: 'request-screenshot', pageId: pageOrder[currentPageIndex] }, '*');
-        } else {
-          parent.postMessage({ type: 'render-complete' }, '*');
-        }
-      }
-
-      if (data.type === 'render-complete') {
-        renderAllPages();
-      }
-    });
-
-    window.parent.postMessage({ type: 'pdf-frame-ready' }, '*');
-  </script>
-</body>
-</html>
-
-
-
+  window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
+</script>
