@@ -18,6 +18,7 @@
       box-sizing: border-box;
       background: white;
       margin: 0 auto;
+      overflow: hidden;
     }
     .landscape {
       width: 1123px;
@@ -36,7 +37,9 @@
     function createPageContainer(pageId, html, orientation = 'portrait') {
       const pageDiv = document.createElement('div');
       pageDiv.className = 'page page-break';
-      if (orientation === 'landscape') pageDiv.classList.add('landscape');
+      if (orientation === 'landscape') {
+        pageDiv.classList.add('landscape');
+      }
       pageDiv.id = `rendered-${pageId}`;
       pageDiv.innerHTML = html;
       document.getElementById('pages').appendChild(pageDiv);
@@ -59,12 +62,12 @@
       });
 
       Promise.all(renderPromises).then(() => {
-        pdf.save('template-download.pdf');
+        pdf.save('tangihanga-template.pdf');
         parent.postMessage({ type: 'done' }, '*');
       });
     }
 
-    const pageOrder = ['#coverPreviewBox', '#orderPreviewBox', '#backPreviewBox'];
+    const pageOrder = ['coverPreviewBox', 'orderPreviewBox', 'backPreviewBox'];
     let currentPageIndex = 0;
 
     window.addEventListener('message', (event) => {
@@ -72,34 +75,30 @@
       if (!data || !data.type) return;
 
       if (data.type === 'pdf-frame-ready') {
-        parent.postMessage({ type: 'next-page' }, '*');
+        parent.postMessage({ type: 'request-screenshot', pageId: pageOrder[currentPageIndex] }, '*');
       }
 
-      if (data.type === 'capture-page') {
-        const { pageId, orientation } = data;
-        const el = document.querySelector(pageId);
-        if (!el) {
-          console.warn('Element not found for capture:', pageId);
-          parent.postMessage({ type: 'next-page' }, '*');
-          return;
-        }
-        createPageContainer(pageId.replace("#", ""), el.outerHTML, orientation);
+      if (data.type === 'renderContent') {
+        const { pageId, html, orientation } = data;
+        createPageContainer(pageId, html, orientation || 'portrait');
         currentPageIndex++;
         if (currentPageIndex < pageOrder.length) {
           parent.postMessage({ type: 'next-page' }, '*');
         } else {
-          parent.postMessage({ type: 'render-pdf' }, '*');
+          parent.postMessage({ type: 'render-complete' }, '*');
         }
       }
 
-      if (data.type === 'render-pdf') {
+      if (data.type === 'render-complete') {
         renderAllPages();
       }
     });
 
+    // Kick things off
     window.parent.postMessage({ type: 'pdf-frame-ready' }, '*');
   </script>
 </body>
 </html>
+
 
 
