@@ -1,51 +1,102 @@
-<script>
-  const { jsPDF } = window.jspdf;
-  const pages = [];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>PDF Export</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+      background: #fff;
+    }
+    .page {
+      width: 794px;
+      height: 1123px;
+      padding: 20px;
+      box-sizing: border-box;
+      background: white;
+      margin: 0 auto;
+    }
+    .landscape {
+      width: 1123px;
+      height: 794px;
+    }
+    .page-break {
+      page-break-after: always;
+    }
+  </style>
+</head>
+<body>
+  <!-- Placeholder for visibility only -->
+  <div id="coverPreviewBox" class="page page-break">Cover Preview</div>
+  <div id="orderPreviewBox" class="page page-break landscape" style="display:none;">Order of Service</div>
+  <div id="backPreviewBox" class="page page-break" style="display:none;">Back Cover</div>
 
-  window.addEventListener("message", async (event) => {
-    const data = event.data;
-    if (!data || !data.type) return;
+  <script>
+    const { jsPDF } = window.jspdf;
+    const pages = [];
 
-    if (data.type === "request-screenshot") {
-      const { pageId, orientation } = data;
+    // Receive messages from Lightbox
+    window.addEventListener("message", async (event) => {
+      const data = event.data;
+      if (!data || !data.type) return;
 
-      const target = document.getElementById(pageId);
-      if (!target) {
-        pages.push({ img: null, orientation }); // Push empty if missing
-        parent.postMessage({ type: "next-page" }, "*");
-        return;
+      if (data.type === "request-screenshot") {
+        const { pageId, orientation } = data;
+        console.log("📥 Received screenshot request:", pageId, orientation);
+
+        const target = document.getElementById(pageId);
+        if (!target) {
+          console.warn("❌ Could not find page element:", pageId);
+          pages.push({ img: null, orientation });
+          parent.postMessage({ type: "next-page" }, "*");
+          return;
+        }
+
+        // Temporarily show only this target
+        Array.from(document.querySelectorAll(".page")).forEach(p => p.style.display = "none");
+        target.style.display = "block";
+
+        try {
+          const canvas = await html2canvas(target, { scale: 2 });
+          const imgData = canvas.toDataURL("image/jpeg", 1.0);
+          pages.push({ img: imgData, orientation });
+          parent.postMessage({ type: "next-page" }, "*");
+        } catch (err) {
+          console.error("❌ Error capturing screenshot:", err);
+          pages.push({ img: null, orientation });
+          parent.postMessage({ type: "next-page" }, "*");
+        }
       }
 
-      try {
-        const canvas = await html2canvas(target, { scale: 2 });
-        const imgData = canvas.toDataURL("image/jpeg", 1.0);
-        pages.push({ img: imgData, orientation });
-        parent.postMessage({ type: "next-page" }, "*");
-      } catch (err) {
-        console.error("Error capturing screenshot:", err);
-        pages.push({ img: null, orientation });
-        parent.postMessage({ type: "next-page" }, "*");
+      if (data.type === "render-complete") {
+        console.log("📦 Rendering all pages to PDF...");
+        const pdf = new jsPDF();
+        pages.forEach((page, index) => {
+          const { img, orientation } = page;
+          if (!img) return;
+
+          if (index > 0) pdf.addPage(orientation === "landscape" ? "l" : "p");
+          pdf.setPage(index + 1);
+
+          const width = orientation === "landscape" ? 297 : 210;
+          const height = orientation === "landscape" ? 210 : 297;
+          pdf.addImage(img, "JPEG", 0, 0, width, height);
+        });
+
+        pdf.save("template-download.pdf");
+        parent.postMessage({ type: "done" }, "*");
       }
-    }
+    });
 
-    if (data.type === "render-complete") {
-      const pdf = new jsPDF();
-      pages.forEach((page, index) => {
-        const { img, orientation } = page;
-        if (!img) return;
-
-        if (index > 0) pdf.addPage(orientation === "landscape" ? "l" : "p");
-        pdf.setPage(index + 1);
-
-        const width = orientation === "landscape" ? 297 : 210;
-        const height = orientation === "landscape" ? 210 : 297;
-        pdf.addImage(img, "JPEG", 0, 0, width, height);
-      });
-
-      pdf.save("template-download.pdf");
-      parent.postMessage({ type: "done" }, "*");
-    }
-  });
-
-  window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
-</script>
+    // Notify Lightbox when iframe is ready
+    window.addEventListener("load", () => {
+      console.log("✅ iframe fully loaded, sending pdf-frame-ready");
+      parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    });
+  </script>
+</body>
+</html>
