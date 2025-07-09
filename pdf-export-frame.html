@@ -3,106 +3,82 @@
 <head>
   <meta charset="UTF-8">
   <title>PDF Export Frame</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     body {
       margin: 0;
-      padding: 0;
+      font-family: Arial, sans-serif;
     }
-    .pdf-page {
-      width: 100%;
-      min-height: 100vh;
-      padding: 20px;
+    .page {
+      width: 210mm;
+      height: 297mm;
+      padding: 20mm;
       box-sizing: border-box;
+      background: white;
+      overflow: hidden;
     }
-    #coverPreviewBox, #orderPreviewBox, #backPreviewBox {
-      display: none;
+    .landscape {
+      width: 297mm;
+      height: 210mm;
     }
   </style>
 </head>
 <body>
-  <div id="coverPreviewBox" class="pdf-page"></div>
-  <div id="orderPreviewBox" class="pdf-page"></div>
-  <div id="backPreviewBox" class="pdf-page"></div>
+  <div id="captureArea" style="visibility: hidden;"></div>
 
   <script>
-    const pageOrder = ["coverPreviewBox", "orderPreviewBox", "backPreviewBox"];
-    let renderedPages = {};
+    const { jsPDF } = window.jspdf;
+    let renderedPages = [];
+    let currentContent = {};
 
-    function showOnly(id) {
-      pageOrder.forEach(pid => {
-        document.getElementById(pid).style.display = pid === id ? "block" : "none";
-      });
+    function wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     window.addEventListener("message", async (event) => {
-      const msg = event.data;
+      const data = event.data;
 
-      if (msg.type === "request-screenshot") {
-        showOnly(msg.pageId);
-        setTimeout(() => {
-          window.parent.postMessage({ type: "next-page" }, "*");
-        }, 600);
-      }
+      if (data?.type === "renderContent") {
+        currentContent[data.pageId] = data.html;
 
-      if (msg.type === "renderContent") {
-        const pageDiv = document.getElementById(msg.pageId);
-        if (pageDiv) {
-          pageDiv.innerHTML = msg.html;
-          renderedPages[msg.pageId] = true;
-        }
-      }
+      } else if (data?.type === "request-screenshot") {
+        const pageId = data.pageId;
+        const orientation = data.orientation || "portrait";
 
-      if (msg.type === "render-complete") {
-        try {
-          const { jsPDF } = window.jspdf;
-          const pdf = new jsPDF();
+        const container = document.getElementById("captureArea");
+        container.className = "page" + (orientation === "landscape" ? " landscape" : "");
+        container.innerHTML = currentContent[pageId] || `<div>[Missing content for ${pageId}]</div>`;
 
-          for (let i = 0; i < pageOrder.length; i++) {
-            const pageId = pageOrder[i];
-            const element = document.getElementById(pageId);
-            if (!element || !renderedPages[pageId]) continue;
+        await wait(500);
 
-            const canvas = await html2canvas(element, {
-              scale: 2,
-              useCORS: true
-            });
+        const canvas = await html2canvas(container, { scale: 2 });
+        const imgData = canvas.toDataURL("image/png");
+        renderedPages.push({ img: imgData, orientation });
 
-            const width = canvas.width;
-            const height = canvas.height;
+        parent.postMessage({ type: "next-page" }, "*");
 
-            if (width === 0 || height === 0) {
-              console.warn(`Skipping ${pageId} due to 0 size`);
-              continue;
-            }
+      } else if (data?.type === "render-complete") {
+        const doc = new jsPDF();
+        renderedPages.forEach((page, index) => {
+          if (index > 0) doc.addPage(page.orientation);
+          doc.addImage(page.img, "PNG", 0, 0, doc.internal.pageSize.getWidth(), doc.internal.pageSize.getHeight());
+        });
 
-            const imgData = canvas.toDataURL("image/png");
-            if (!imgData.startsWith("data:image/")) {
-              console.error(`Invalid image data from canvas for ${pageId}`);
-              continue;
-            }
+        doc.save("Tangihanga_Template.pdf");
+        parent.postMessage({ type: "done" }, "*");
 
-            const imgProps = pdf.getImageProperties(imgData);
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-            if (i > 0) pdf.addPage();
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-          }
-
-          pdf.save("funeral-template.pdf");
-          window.parent.postMessage({ type: "done" }, "*");
-        } catch (err) {
-          console.error("PDF generation error:", err);
-        }
+      } else if (data?.type === "ping") {
+        parent.postMessage({ type: "pdf-frame-ready" }, "*");
       }
     });
 
-    window.parent.postMessage({ type: "pdf-frame-ready" }, "*");
+    // Notify parent we’re ready
+    parent.postMessage({ type: "pdf-frame-ready" }, "*");
   </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </body>
 </html>
+
 
 
 
