@@ -1,21 +1,21 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>PDF Export Frame</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <meta charset="UTF-8" />
+  <title>Export PDF Frame</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
     body {
       margin: 0;
-      font-family: Arial, sans-serif;
+      padding: 0;
+      background: white;
     }
     .page {
       width: 210mm;
-      height: 297mm;
+      min-height: 297mm;
       padding: 20mm;
-      box-sizing: border-box;
+      margin: 0 auto;
       background: white;
-      overflow: hidden;
     }
     .landscape {
       width: 297mm;
@@ -24,58 +24,50 @@
   </style>
 </head>
 <body>
-  <div id="captureArea" style="visibility: hidden;"></div>
+<script>
+  let htmlPages = [];
 
-  <script>
-    const { jsPDF } = window.jspdf;
-    let renderedPages = [];
-    let currentContent = {};
+  window.addEventListener("message", async (event) => {
+    const { type, html, pageId, orientation } = event.data;
 
-    function wait(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
+    if (type === "ping") {
+      parent.postMessage({ type: "pdf-frame-ready" }, "*");
     }
 
-    window.addEventListener("message", async (event) => {
-      const data = event.data;
+    if (type === "renderContent") {
+      htmlPages.push({ html, orientation });
+      parent.postMessage({ type: "next-page" }, "*");
+    }
 
-      if (data?.type === "renderContent") {
-        currentContent[data.pageId] = data.html;
+    if (type === "render-complete") {
+      const container = document.createElement("div");
+      htmlPages.forEach(page => {
+        const pageDiv = document.createElement("div");
+        pageDiv.className = `page ${page.orientation}`;
+        pageDiv.innerHTML = page.html;
+        container.appendChild(pageDiv);
+      });
 
-      } else if (data?.type === "request-screenshot") {
-        const pageId = data.pageId;
-        const orientation = data.orientation || "portrait";
+      document.body.appendChild(container);
 
-        const container = document.getElementById("captureArea");
-        container.className = "page" + (orientation === "landscape" ? " landscape" : "");
-        container.innerHTML = currentContent[pageId] || `<div>[Missing content for ${pageId}]</div>`;
+      try {
+        const opt = {
+          margin: 0,
+          filename: "Tangihanga_Template.pdf",
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2 },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+        };
 
-        await wait(500);
-
-        const canvas = await html2canvas(container, { scale: 2 });
-        const imgData = canvas.toDataURL("image/png");
-        renderedPages.push({ img: imgData, orientation });
-
-        parent.postMessage({ type: "next-page" }, "*");
-
-      } else if (data?.type === "render-complete") {
-        const doc = new jsPDF();
-        renderedPages.forEach((page, index) => {
-          if (index > 0) doc.addPage(page.orientation);
-          doc.addImage(page.img, "PNG", 0, 0, doc.internal.pageSize.getWidth(), doc.internal.pageSize.getHeight());
-        });
-
-        doc.save("Tangihanga_Template.pdf");
+        await html2pdf().from(container).set(opt).save();
         parent.postMessage({ type: "done" }, "*");
-
-      } else if (data?.type === "ping") {
-        parent.postMessage({ type: "pdf-frame-ready" }, "*");
+      } catch (err) {
+        console.error("❌ PDF generation error:", err);
+        parent.postMessage({ type: "done" }, "*");
       }
-    });
-
-    // Notify parent we’re ready
-    parent.postMessage({ type: "pdf-frame-ready" }, "*");
-  </script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    }
+  });
+</script>
 </body>
 </html>
 
