@@ -1,46 +1,35 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <title>Export PDF Frame</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      background: white;
-    }
-    .page {
-      width: 210mm;
-      min-height: 297mm;
-      padding: 20mm;
-      margin: 0 auto;
-      background: white;
-    }
-    .landscape {
-      width: 297mm;
-      height: 210mm;
-    }
-  </style>
-</head>
-<body>
 <script>
   let htmlPages = [];
+  let currentStep = "";
 
   window.addEventListener("message", async (event) => {
     const { type, html, pageId, orientation } = event.data;
 
+    console.log("📩 Received:", type);
+
     if (type === "ping") {
+      console.log("✅ Pinging back to parent...");
       parent.postMessage({ type: "pdf-frame-ready" }, "*");
     }
 
-    if (type === "renderContent") {
+    else if (type === "renderContent") {
+      console.log(`🖼️ Rendering ${pageId} (${orientation})`);
+      
+      // Show current HTML visibly
+      document.body.innerHTML = html;
+
+      // Store for PDF later
       htmlPages.push({ html, orientation });
+
+      // Wait for user to see the page before cycling
+      await new Promise(r => setTimeout(r, 1200));
       parent.postMessage({ type: "next-page" }, "*");
     }
 
-    if (type === "render-complete") {
+    else if (type === "render-complete") {
+      console.log("📦 Rendering complete. Compiling PDF…");
       const container = document.createElement("div");
+
       htmlPages.forEach(page => {
         const pageDiv = document.createElement("div");
         pageDiv.className = `page ${page.orientation}`;
@@ -48,6 +37,7 @@
         container.appendChild(pageDiv);
       });
 
+      document.body.innerHTML = ""; // Clear before PDF render
       document.body.appendChild(container);
 
       try {
@@ -66,10 +56,17 @@
         parent.postMessage({ type: "done" }, "*");
       }
     }
+
+    // If your parent uses this:
+    else if (type === "get-html") {
+      parent.postMessage({
+        type: "html-content",
+        html: document.body.innerHTML
+      }, "*");
+    }
   });
 </script>
-</body>
-</html>
+
 
 
 
