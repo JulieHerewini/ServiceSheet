@@ -1,71 +1,81 @@
-<script>
-  let htmlPages = [];
-  let currentStep = "";
-
-  window.addEventListener("message", async (event) => {
-    const { type, html, pageId, orientation } = event.data;
-
-    console.log("📩 Received:", type);
-
-    if (type === "ping") {
-      console.log("✅ Pinging back to parent...");
-      parent.postMessage({ type: "pdf-frame-ready" }, "*");
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>PDF Export</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
     }
-
-    else if (type === "renderContent") {
-      console.log(`🖼️ Rendering ${pageId} (${orientation})`);
-      
-      // Show current HTML visibly
-      document.body.innerHTML = html;
-
-      // Store for PDF later
-      htmlPages.push({ html, orientation });
-
-      // Wait for user to see the page before cycling
-      await new Promise(r => setTimeout(r, 1200));
-      parent.postMessage({ type: "next-page" }, "*");
+    #pageContainer {
+      width: 100%;
+      height: auto;
     }
+  </style>
+</head>
+<body>
+  <div id="pageContainer"></div>
 
-    else if (type === "render-complete") {
-      console.log("📦 Rendering complete. Compiling PDF…");
-      const container = document.createElement("div");
+  <script>
+    const container = document.getElementById("pageContainer");
+    let doc;
+    let currentPage = 0;
 
-      htmlPages.forEach(page => {
-        const pageDiv = document.createElement("div");
-        pageDiv.className = `page ${page.orientation}`;
-        pageDiv.innerHTML = page.html;
-        container.appendChild(pageDiv);
-      });
+    window.addEventListener("message", async (event) => {
+      const { type, html, pageId, orientation } = event.data;
 
-      document.body.innerHTML = ""; // Clear before PDF render
-      document.body.appendChild(container);
+      if (type === "ping") {
+        console.log("🔁 Got ping, replying to parent");
+        parent.postMessage({ type: "pdf-frame-ready" }, "*");
+      }
 
-      try {
-        const opt = {
-          margin: 0,
-          filename: "Tangihanga_Template.pdf",
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2 },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
-        };
+      else if (type === "renderContent") {
+        console.log(`📄 Rendering: ${pageId} (${orientation})`);
 
-        await html2pdf().from(container).set(opt).save();
-        parent.postMessage({ type: "done" }, "*");
-      } catch (err) {
-        console.error("❌ PDF generation error:", err);
+        container.innerHTML = html;
+        await new Promise(resolve => setTimeout(resolve, 1200)); // wait for render
+
+        const canvas = await html2canvas(container, { scale: 2 });
+        const imgData = canvas.toDataURL("image/png");
+
+        const { jsPDF } = window.jspdf;
+        if (!doc) {
+          doc = new jsPDF({
+            orientation: orientation === "landscape" ? "landscape" : "portrait",
+            unit: "mm",
+            format: "a4"
+          });
+        } else {
+          doc.addPage();
+          doc.setPage(doc.getNumberOfPages());
+        }
+
+        const width = doc.internal.pageSize.getWidth();
+        const height = doc.internal.pageSize.getHeight();
+        doc.addImage(imgData, 'PNG', 0, 0, width, height);
+
+        parent.postMessage({ type: "next-page" }, "*");
+      }
+
+      else if (type === "render-complete") {
+        console.log("✅ Export complete. Downloading PDF...");
+        doc.save("Tangihanga_Template.pdf");
         parent.postMessage({ type: "done" }, "*");
       }
-    }
 
-    // If your parent uses this:
-    else if (type === "get-html") {
-      parent.postMessage({
-        type: "html-content",
-        html: document.body.innerHTML
-      }, "*");
-    }
-  });
-</script>
+      else if (type === "get-html") {
+        parent.postMessage({
+          type: "html-content",
+          html: container.innerHTML
+        }, "*");
+      }
+    });
+  </script>
+</body>
+</html>
 
 
 
