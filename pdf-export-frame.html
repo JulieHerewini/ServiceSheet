@@ -1,85 +1,97 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8" />
-  <title>PDF Export</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <meta charset="UTF-8">
+  <title>PDF Export Frame</title>
+  <script src="https://unpkg.com/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
   <style>
     body {
       margin: 0;
       padding: 0;
+      background: white;
     }
-    #pageContainer {
+    .pdf-page {
+      display: none;
       width: 100%;
-      height: auto;
+      min-height: 100vh;
+      padding: 0;
+    }
+    .pdf-page.active {
+      display: block;
     }
   </style>
 </head>
 <body>
-  <div id="pageContainer"></div>
+  <div id="coverExportBox" class="pdf-page"></div>
+  <div id="orderExportBox" class="pdf-page"></div>
+  <div id="backExportBox" class="pdf-page"></div>
 
   <script>
-    const container = document.getElementById("pageContainer");
-    let doc;
-    let currentPage = 0;
+    let currentPageIndex = 0;
+    const flipPages = ["coverExportBox", "orderExportBox", "backExportBox"];
+    const pageHtml = {};
 
-    window.addEventListener("message", async (event) => {
-      const { type, html, pageId, orientation } = event.data;
+    function postToWix(type, data = {}) {
+      parent.postMessage({ type, ...data }, "*");
+    }
+
+    function requestPageHtml() {
+      const pageId = flipPages[currentPageIndex];
+      postToWix("get-html", { pageId });
+    }
+
+    function renderPageContent({ html, pageId, orientation }) {
+      const container = document.getElementById(pageId);
+      if (!container) return;
+
+      container.innerHTML = html;
+      container.classList.add("active");
+
+      // Delay PDF render slightly to ensure layout completes
+      setTimeout(() => {
+        html2pdf()
+          .set({
+            filename: `${pageId}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'pt', format: orientation === "landscape" ? 'a4' : 'a5', orientation }
+          })
+          .from(container)
+          .toContainer()
+          .toCanvas()
+          .toPdf()
+          .get('pdf')
+          .then(() => {
+            container.classList.remove("active");
+            postToWix("next-page");
+          });
+      }, 1000);
+    }
+
+    window.addEventListener("message", (event) => {
+      const { type } = event.data;
 
       if (type === "ping") {
-        console.log("🔁 Got ping, replying to parent");
-        parent.postMessage({ type: "pdf-frame-ready" }, "*");
+        postToWix("pdf-frame-ready");
       }
 
-      else if (type === "renderContent") {
-        console.log(`📄 Rendering: ${pageId} (${orientation})`);
-
-        container.innerHTML = html;
-        await new Promise(resolve => setTimeout(resolve, 1200)); // wait for render
-
-        const canvas = await html2canvas(container, { scale: 2 });
-        const imgData = canvas.toDataURL("image/png");
-
-        const { jsPDF } = window.jspdf;
-        if (!doc) {
-          doc = new jsPDF({
-            orientation: orientation === "landscape" ? "landscape" : "portrait",
-            unit: "mm",
-            format: "a4"
-          });
-        } else {
-          doc.addPage();
-          doc.setPage(doc.getNumberOfPages());
-        }
-
-        const width = doc.internal.pageSize.getWidth();
-        const height = doc.internal.pageSize.getHeight();
-        doc.addImage(imgData, 'PNG', 0, 0, width, height);
-
-        parent.postMessage({ type: "next-page" }, "*");
+      if (type === "get-html") {
+        requestPageHtml();
       }
 
-      else if (type === "render-complete") {
-        console.log("✅ Export complete. Downloading PDF...");
-        doc.save("Tangihanga_Template.pdf");
-        parent.postMessage({ type: "done" }, "*");
+      if (type === "renderContent") {
+        renderPageContent(event.data);
       }
 
-      else if (type === "get-html") {
-        parent.postMessage({
-          type: "html-content",
-          html: container.innerHTML
-        }, "*");
+      if (type === "render-complete") {
+        postToWix("done");
       }
     });
+
+    // Notify on load
+    window.onload = () => {
+      postToWix("pdf-frame-ready");
+    };
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
