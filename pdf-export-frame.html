@@ -1,82 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>PDF Export Frame</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
-    body {
-      margin: 0;
-      padding: 0;
+    body { margin: 0; }
+    #renderArea {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      box-sizing: border-box;
     }
-    .page {
-      page-break-after: always;
-    }
-    .landscape {
-      width: 297mm;
-      height: 210mm;
-    }
-    .portrait {
-      width: 210mm;
-      height: 297mm;
+    .page-wrapper {
+      max-width: 1000px;
+      width: 100%;
     }
   </style>
 </head>
 <body>
+  <div id="renderArea"><div class="page-wrapper" id="pageWrapper"></div></div>
+
   <script>
-    let htmlPages = [];
+    const { jsPDF } = window.jspdf;
+    let currentPageId = "";
+    let pdf = null;
 
     window.addEventListener("message", async (event) => {
       const { type, html, pageId, orientation } = event.data;
-
-      console.log("📩 Received:", type);
 
       if (type === "ping") {
         parent.postMessage({ type: "pdf-frame-ready" }, "*");
       }
 
-      else if (type === "renderContent") {
-        console.log(`🖼️ Rendering ${pageId} (${orientation})`);
-        htmlPages.push({ html, orientation });
-
-        // Show current HTML
-        document.body.innerHTML = html;
-
-        // Wait before requesting next page
-        await new Promise(r => setTimeout(r, 1000));
-        parent.postMessage({ type: "next-page" }, "*");
+      if (type === "get-html") {
+        parent.postMessage({ type: "get-html" }, "*");
       }
 
-      else if (type === "render-complete") {
-        console.log("📦 Rendering complete. Compiling PDF…");
+      if (type === "renderContent" && html && pageId) {
+        currentPageId = pageId;
+        document.getElementById("pageWrapper").innerHTML = html;
 
-        const container = document.createElement("div");
+        await new Promise((resolve) => setTimeout(resolve, 1200));
 
-        htmlPages.forEach(page => {
-          const div = document.createElement("div");
-          div.className = `page ${page.orientation}`;
-          div.innerHTML = page.html;
-          container.appendChild(div);
+        const element = document.getElementById("pageWrapper");
+        html2canvas(element, { scale: 2 }).then(canvas => {
+          const imgData = canvas.toDataURL("image/png");
+          const imgProps = orientation === "landscape"
+            ? [canvas.width * 0.264583, canvas.height * 0.264583, "landscape"]
+            : [canvas.width * 0.264583, canvas.height * 0.264583, "portrait"];
+
+          if (!pdf) {
+            pdf = new jsPDF({ orientation: imgProps[2], unit: "mm", format: [imgProps[0], imgProps[1]] });
+          } else {
+            pdf.addPage([imgProps[0], imgProps[1]], imgProps[2]);
+            pdf.setPage(pdf.getNumberOfPages());
+          }
+
+          pdf.addImage(imgData, "PNG", 0, 0, imgProps[0], imgProps[1]);
+
+          parent.postMessage({ type: "next-page" }, "*");
         });
+      }
 
-        document.body.innerHTML = "";
-        document.body.appendChild(container);
-
-        try {
-          const opt = {
-            margin: 0,
-            filename: "Tangihanga_Template.pdf",
-            image: { type: "jpeg", quality: 0.98 },
-            html2canvas: { scale: 2 },
-            jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
-          };
-
-          await html2pdf().from(container).set(opt).save();
-          parent.postMessage({ type: "done" }, "*");
-        } catch (err) {
-          console.error("❌ PDF generation error:", err);
-          parent.postMessage({ type: "done" }, "*");
-        }
+      if (type === "render-complete") {
+        pdf.save("template-preview.pdf");
+        parent.postMessage({ type: "done" }, "*");
       }
     });
   </script>
