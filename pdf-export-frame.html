@@ -3,95 +3,67 @@
 <head>
   <meta charset="UTF-8">
   <title>PDF Export Frame</title>
-  <script src="https://unpkg.com/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      background: white;
-    }
-    .pdf-page {
-      display: none;
-      width: 100%;
-      min-height: 100vh;
-      padding: 0;
-    }
-    .pdf-page.active {
-      display: block;
-    }
-  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
-<body>
-  <div id="coverExportBox" class="pdf-page"></div>
-  <div id="orderExportBox" class="pdf-page"></div>
-  <div id="backExportBox" class="pdf-page"></div>
-
+<body style="margin:0;padding:0;">
   <script>
-    let currentPageIndex = 0;
-    const flipPages = ["coverExportBox", "orderExportBox", "backExportBox"];
-    const pageHtml = {};
+    let pages = [];
+    let currentPage = 0;
 
-    function postToWix(type, data = {}) {
-      parent.postMessage({ type, ...data }, "*");
-    }
-
-    function requestPageHtml() {
-      const pageId = flipPages[currentPageIndex];
-      postToWix("get-html", { pageId });
-    }
-
-    function renderPageContent({ html, pageId, orientation }) {
-      const container = document.getElementById(pageId);
-      if (!container) return;
-
-      container.innerHTML = html;
-      container.classList.add("active");
-
-      // Delay PDF render slightly to ensure layout completes
-      setTimeout(() => {
-        html2pdf()
-          .set({
-            filename: `${pageId}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true },
-            jsPDF: { unit: 'pt', format: orientation === "landscape" ? 'a4' : 'a5', orientation }
-          })
-          .from(container)
-          .toContainer()
-          .toCanvas()
-          .toPdf()
-          .get('pdf')
-          .then(() => {
-            container.classList.remove("active");
-            postToWix("next-page");
-          });
-      }, 1000);
-    }
-
-    window.addEventListener("message", (event) => {
-      const { type } = event.data;
+    window.addEventListener("message", async (event) => {
+      const { type, html, pageId, orientation } = event.data;
 
       if (type === "ping") {
-        postToWix("pdf-frame-ready");
-      }
+        parent.postMessage({ type: "pdf-frame-ready" }, "*");
 
-      if (type === "get-html") {
-        requestPageHtml();
-      }
+      } else if (type === "get-html") {
+        parent.postMessage({ type: "get-html" }, "*");
 
-      if (type === "renderContent") {
-        renderPageContent(event.data);
-      }
+      } else if (type === "renderContent") {
+        const container = document.createElement("div");
+        container.innerHTML = html;
+        container.style.width = "1000px";
+        container.style.margin = "0 auto";
+        document.body.innerHTML = '';
+        document.body.appendChild(container);
 
-      if (type === "render-complete") {
-        postToWix("done");
+        // Wait for images and fonts to load
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        const pdf = new jspdf.jsPDF({ orientation: orientation || "portrait", unit: "px", format: [1000, 1414] });
+
+        await pdf.html(container, {
+          callback: (doc) => {
+            const blob = doc.output("blob");
+            pages.push(blob);
+            parent.postMessage({ type: "next-page" }, "*");
+          }
+        });
+
+      } else if (type === "render-complete") {
+        if (pages.length > 0) {
+          const mergedPdf = new jspdf.jsPDF({ unit: "px", format: [1000, 1414] });
+
+          for (let i = 0; i < pages.length; i++) {
+            if (i !== 0) mergedPdf.addPage();
+            const page = await pages[i].arrayBuffer();
+            await mergedPdf.addImage(await blobToBase64(new Blob([page])), 'PNG', 0, 0, 1000, 1414);
+          }
+
+          mergedPdf.save("ServiceSheet.pdf");
+          parent.postMessage({ type: "done" }, "*");
+        }
       }
     });
 
-    // Notify on load
-    window.onload = () => {
-      postToWix("pdf-frame-ready");
-    };
+    function blobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
   </script>
 </body>
 </html>
