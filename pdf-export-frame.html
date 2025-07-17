@@ -8,71 +8,77 @@
     body {
       margin: 0;
       padding: 0;
-      font-family: sans-serif;
-      background: white;
     }
-    #exportArea {
-      width: 100%;
-      min-height: 100vh;
+    .page {
+      page-break-after: always;
+    }
+    .landscape {
+      width: 297mm;
+      height: 210mm;
+    }
+    .portrait {
+      width: 210mm;
+      height: 297mm;
     }
   </style>
 </head>
 <body>
-  <div id="exportArea"></div>
-
   <script>
-    let htmlQueue = [];
-    let pageCounter = 0;
-    let ready = false;
+    let htmlPages = [];
 
-    // Tell Wix we're ready to receive content
     window.addEventListener("message", async (event) => {
-      const { type, html, orientation } = event.data;
+      const { type, html, pageId, orientation } = event.data;
+
+      console.log("📩 Received:", type);
 
       if (type === "ping") {
-        ready = true;
-        postMessageToWix({ type: "pdf-frame-ready" });
+        parent.postMessage({ type: "pdf-frame-ready" }, "*");
+      }
 
-      } else if (type === "get-html") {
-        postMessageToWix({ type: "get-html" });
+      else if (type === "renderContent") {
+        console.log(`🖼️ Rendering ${pageId} (${orientation})`);
+        htmlPages.push({ html, orientation });
 
-      } else if (type === "renderContent") {
-        const pageWrapper = document.createElement("div");
-        pageWrapper.innerHTML = html;
-        pageWrapper.style.pageBreakAfter = "always";
-        pageWrapper.style.width = (orientation === "landscape") ? "1122px" : "794px";
-        pageWrapper.style.height = (orientation === "landscape") ? "794px" : "1122px";
-        htmlQueue.push(pageWrapper);
-        pageCounter++;
-        postMessageToWix({ type: "next-page" });
+        // Show current HTML
+        document.body.innerHTML = html;
 
-      } else if (type === "render-complete") {
-        renderPDF();
+        // Wait before requesting next page
+        await new Promise(r => setTimeout(r, 1000));
+        parent.postMessage({ type: "next-page" }, "*");
+      }
+
+      else if (type === "render-complete") {
+        console.log("📦 Rendering complete. Compiling PDF…");
+
+        const container = document.createElement("div");
+
+        htmlPages.forEach(page => {
+          const div = document.createElement("div");
+          div.className = `page ${page.orientation}`;
+          div.innerHTML = page.html;
+          container.appendChild(div);
+        });
+
+        document.body.innerHTML = "";
+        document.body.appendChild(container);
+
+        try {
+          const opt = {
+            margin: 0,
+            filename: "Tangihanga_Template.pdf",
+            image: { type: "jpeg", quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+          };
+
+          await html2pdf().from(container).set(opt).save();
+          parent.postMessage({ type: "done" }, "*");
+        } catch (err) {
+          console.error("❌ PDF generation error:", err);
+          parent.postMessage({ type: "done" }, "*");
+        }
       }
     });
-
-    function postMessageToWix(data) {
-      if (window.parent) {
-        window.parent.postMessage(data, "*");
-      }
-    }
-
-    async function renderPDF() {
-      const container = document.getElementById("exportArea");
-      htmlQueue.forEach(el => container.appendChild(el));
-
-      const opt = {
-        margin: 0,
-        filename: 'ServiceSheet.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'px', format: 'a4', orientation: 'portrait' }
-      };
-
-      await html2pdf().set(opt).from(container).save();
-
-      postMessageToWix({ type: "done" });
-    }
   </script>
 </body>
 </html>
