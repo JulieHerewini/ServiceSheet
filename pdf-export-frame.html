@@ -35,6 +35,23 @@
       return new Promise((resolve) => setTimeout(resolve, timeout));
     }
 
+    function waitForIframesToLoad(wrapper) {
+      const iframes = wrapper.querySelectorAll("iframe");
+      if (iframes.length === 0) return Promise.resolve();
+
+      return new Promise((resolve) => {
+        let loaded = 0;
+        iframes.forEach((iframe) => {
+          iframe.onload = () => {
+            loaded++;
+            if (loaded === iframes.length) resolve();
+          };
+        });
+        // Fallback in case onload doesn't fire
+        setTimeout(resolve, 3000);
+      });
+    }
+
     window.addEventListener("message", async (event) => {
       const { type, html, pageId, orientation } = event.data;
 
@@ -53,6 +70,7 @@
 
         // Wait for DOM and CMS content (including iframes)
         await waitForContentToRender();
+        await waitForIframesToLoad(wrapper);
 
         html2canvas(wrapper, { scale: 2 }).then(canvas => {
           const imgData = canvas.toDataURL("image/png");
@@ -81,5 +99,3 @@
   </script>
 </body>
 </html>
-
-
