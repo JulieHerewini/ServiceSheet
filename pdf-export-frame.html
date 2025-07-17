@@ -31,6 +31,10 @@
     let currentPageId = "";
     let pdf = null;
 
+    function waitForContentToRender(timeout = 4000) {
+      return new Promise((resolve) => setTimeout(resolve, timeout));
+    }
+
     window.addEventListener("message", async (event) => {
       const { type, html, pageId, orientation } = event.data;
 
@@ -44,12 +48,13 @@
 
       if (type === "renderContent" && html && pageId) {
         currentPageId = pageId;
-        document.getElementById("pageWrapper").innerHTML = html;
+        const wrapper = document.getElementById("pageWrapper");
+        wrapper.innerHTML = html;
 
-        await new Promise((resolve) => setTimeout(resolve, 1200));
+        // Wait for DOM and CMS content (including iframes)
+        await waitForContentToRender();
 
-        const element = document.getElementById("pageWrapper");
-        html2canvas(element, { scale: 2 }).then(canvas => {
+        html2canvas(wrapper, { scale: 2 }).then(canvas => {
           const imgData = canvas.toDataURL("image/png");
           const imgProps = orientation === "landscape"
             ? [canvas.width * 0.264583, canvas.height * 0.264583, "landscape"]
@@ -76,3 +81,5 @@
   </script>
 </body>
 </html>
+
+
